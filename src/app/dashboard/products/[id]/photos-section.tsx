@@ -1,6 +1,7 @@
 "use client";
 
-import { RotateCw } from "lucide-react";
+import { Dialog } from "@base-ui/react/dialog";
+import { ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -23,6 +24,7 @@ import { usePhotoUpload } from "@/providers/photo-upload-provider";
 export function PhotosSection({ product }: { product: Product }) {
   const { pick, dragging } = usePhotoUpload();
   const count = product.photos.length;
+  const [zoomedId, setZoomedId] = useState<string | null>(null);
 
   return (
     <section className="flex flex-col gap-3.5">
@@ -34,7 +36,7 @@ export function PhotosSection({ product }: { product: Product }) {
       </div>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-3.5 sm:grid-cols-[repeat(auto-fill,minmax(140px,1fr))]">
         {product.photos.map((photo, i) => (
-          <PhotoTile key={photo.id} product={product} photo={photo} isCover={i === 0} />
+          <PhotoTile key={photo.id} product={product} photo={photo} isCover={i === 0} onZoom={() => setZoomedId(photo.id)} />
         ))}
         <button
           type="button"
@@ -48,11 +50,85 @@ export function PhotosSection({ product }: { product: Product }) {
           <span>{dragging ? "Drop to add" : count ? "Add photos" : "Drop photos here or click to upload"}</span>
         </button>
       </div>
+      <PhotoLightbox product={product} photoId={zoomedId} onChange={setZoomedId} />
     </section>
   );
 }
 
-function PhotoTile({ product, photo, isCover }: { product: Product; photo: Photo; isCover: boolean }) {
+function PhotoLightbox({
+  product,
+  photoId,
+  onChange,
+}: {
+  product: Product;
+  photoId: string | null;
+  onChange: (id: string | null) => void;
+}) {
+  const images = useInventory((s) => s.images);
+  const photos = product.photos.filter((p) => images[p.id]);
+  const index = photos.findIndex((p) => p.id === photoId);
+  const imageUrl = photoId ? images[photoId] : undefined;
+  const step = (delta: number) => {
+    if (photos.length < 2 || index < 0) return;
+    onChange(photos[(index + delta + photos.length) % photos.length].id);
+  };
+
+  const control = "flex items-center justify-center rounded-full bg-white/12 text-white transition-colors hover:bg-white/25";
+  const nav = cn(control, "absolute top-1/2 size-11 -translate-y-1/2");
+
+  return (
+    <Dialog.Root open={!!imageUrl} onOpenChange={(open) => !open && onChange(null)}>
+      <Dialog.Portal>
+        <Dialog.Backdrop className="fixed inset-0 z-50 bg-black/85 duration-150 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+        <Dialog.Popup
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 outline-none sm:p-14"
+          onKeyDown={(e) => {
+            if (e.key === "ArrowLeft") step(-1);
+            if (e.key === "ArrowRight") step(1);
+          }}
+        >
+          <Dialog.Title className="sr-only">
+            {product.name}, photo {index + 1} of {photos.length}
+          </Dialog.Title>
+          {/* Clicking the empty space around the photo closes the lightbox. */}
+          <Dialog.Close aria-label="Close" tabIndex={-1} className="absolute inset-0 cursor-zoom-out" />
+          {imageUrl && (
+            // eslint-disable-next-line @next/next/no-img-element -- local object/data URL from the store
+            <img src={imageUrl} alt="" className="relative max-h-full max-w-full rounded-md object-contain shadow-2xl" />
+          )}
+          <Dialog.Close aria-label="Close" className={cn(control, "absolute top-3 right-3 size-10")}>
+            <X className="size-5" />
+          </Dialog.Close>
+          {photos.length > 1 && (
+            <>
+              <button type="button" onClick={() => step(-1)} aria-label="Previous photo" className={cn(nav, "left-3")}>
+                <ChevronLeft className="size-6" />
+              </button>
+              <button type="button" onClick={() => step(1)} aria-label="Next photo" className={cn(nav, "right-3")}>
+                <ChevronRight className="size-6" />
+              </button>
+              <span className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full bg-black/50 px-3 py-1 text-xs text-white">
+                {index + 1} / {photos.length}
+              </span>
+            </>
+          )}
+        </Dialog.Popup>
+      </Dialog.Portal>
+    </Dialog.Root>
+  );
+}
+
+function PhotoTile({
+  product,
+  photo,
+  isCover,
+  onZoom,
+}: {
+  product: Product;
+  photo: Photo;
+  isCover: boolean;
+  onZoom: () => void;
+}) {
   const imageUrl = useInventory((s) => s.images[photo.id]);
   const { makeCover, removePhoto, assignPhoto, restoreProduct, replacePhotoImage } = useInventory((s) => s);
   const [rotating, setRotating] = useState(false);
@@ -83,8 +159,11 @@ function PhotoTile({ product, photo, isCover }: { product: Product; photo: Photo
   return (
     <div className="relative flex min-w-0 flex-col gap-2">
       <PhotoFill hex={hex} imageUrl={imageUrl} label="sample photo" className="aspect-4/5 rounded-[10px]">
+        {imageUrl && (
+          <button type="button" onClick={onZoom} aria-label="View larger" title="View larger" className="absolute inset-0 cursor-zoom-in" />
+        )}
         {isCover && (
-          <span className="absolute top-2 left-2 rounded-full bg-primary px-[9px] py-[3px] text-[11px] font-semibold text-primary-foreground">
+          <span className="pointer-events-none absolute top-2 left-2 rounded-full bg-primary px-[9px] py-[3px] text-[11px] font-semibold text-primary-foreground">
             Cover
           </span>
         )}

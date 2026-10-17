@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use } from "react";
+import { use, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 
 import { ConfirmDialog } from "@/components/inventory/confirm-dialog";
@@ -11,6 +11,7 @@ import { buttonStyles, Segmented } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { filterCatalogue, sortCatalogue } from "@/lib/inventory/catalogue";
 import { formatMoney, formatPercent } from "@/lib/inventory/format";
+import { suggestSku } from "@/lib/inventory/sku";
 import { margin } from "@/lib/inventory/stock";
 import { CATEGORIES, type Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
@@ -60,7 +61,18 @@ function DetailBar({ product }: { product: Product }) {
   const { filter, search, threshold, sort } = useInventory(
     useShallow((s) => ({ filter: s.filter, search: s.search, threshold: s.threshold, sort: s.sort })),
   );
-  const deleteProduct = useInventory((s) => s.deleteProduct);
+  const { deleteProduct, createProduct, flushPending } = useInventory(
+    useShallow((s) => ({ deleteProduct: s.deleteProduct, createProduct: s.createProduct, flushPending: s.flushPending })),
+  );
+  const [saving, setSaving] = useState(false);
+
+  // Edits already save as you type; these just finish any pending saves, then move on.
+  const save = async (next: "list" | "new") => {
+    setSaving(true);
+    await flushPending();
+    router.push(next === "list" ? "/dashboard/products" : `/dashboard/products/${createProduct()}`);
+    setSaving(false);
+  };
 
   // Step through the catalogue as it's currently filtered (or everything, if this product is filtered out).
   const filtered = sortCatalogue(filterCatalogue(products, filter, search, threshold), sort);
@@ -110,6 +122,12 @@ function DetailBar({ product }: { product: Product }) {
             router.push("/dashboard/products");
           }}
         />
+        <button type="button" disabled={saving} onClick={() => save("new")} className={cn(buttonStyles.outline, "py-2")}>
+          Save &amp; add new
+        </button>
+        <button type="button" disabled={saving} onClick={() => save("list")} className={cn(buttonStyles.primary, "py-2")}>
+          {saving ? "Saving…" : "Save"}
+        </button>
       </div>
     </div>
   );
@@ -124,6 +142,8 @@ function DetailsSection({ product }: { product: Product }) {
   const typeSuggestions = useInventory((s) => s.settings.productTypes[product.category]);
   const typeListId = `types-${product.id}`;
   const setCategory = useInventory((s) => s.setCategory);
+  const products = useInventory((s) => s.products);
+  const suggestion = suggestSku(product, products);
 
   return (
     <section className="flex flex-col gap-[18px]">
@@ -164,12 +184,24 @@ function DetailsSection({ product }: { product: Product }) {
         </label>
         <label className={fieldLabel}>
           SKU
-          <input
-            value={product.sku}
-            onChange={(e) => updateProduct(product.id, { sku: e.target.value.toUpperCase() })}
-            placeholder="e.g. KN-1040"
-            className={cn(fieldInput, "font-mono text-[13px]")}
-          />
+          <span className="relative flex">
+            <input
+              value={product.sku}
+              onChange={(e) => updateProduct(product.id, { sku: e.target.value.toUpperCase() })}
+              placeholder={suggestion}
+              className={cn(fieldInput, "w-full font-mono text-[13px]", !product.sku && "pr-[78px]")}
+            />
+            {!product.sku && (
+              <button
+                type="button"
+                onClick={() => updateProduct(product.id, { sku: suggestion })}
+                title={`Use ${suggestion}`}
+                className="absolute top-1/2 right-1.5 -translate-y-1/2 rounded-full border bg-card px-2.5 py-[3px] text-[11px] font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
+              >
+                Generate
+              </button>
+            )}
+          </span>
         </label>
       </div>
     </section>

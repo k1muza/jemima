@@ -21,6 +21,19 @@ function skuCode(product: Product, variant: Variant, size: string) {
   return [product.sku || "NOSKU", colour, size].join("-");
 }
 
+/**
+ * Suggest a product SKU like KN-1523: two letters from the type (else name, else
+ * category) and the next number after the highest one already in the catalogue.
+ */
+export function suggestSku(product: Product, products: Product[]) {
+  const source = [product.type, product.name, product.category].find((s) => /[a-z]/i.test(s)) ?? "";
+  const prefix = source.replace(/[^a-z]/gi, "").slice(0, 2).toUpperCase().padEnd(2, "X");
+  const taken = new Set(products.filter((p) => p.id !== product.id).map((p) => p.sku.toUpperCase()));
+  let n = Math.max(1000, ...[...taken].map((sku) => Number(sku.match(/(\d+)$/)?.[1] ?? 0))) + 1;
+  while (taken.has(`${prefix}-${n}`)) n++;
+  return `${prefix}-${n}`;
+}
+
 /** Every product × variant × size, with last-updated taken from its newest movement. */
 export function skuRows(products: Product[], movements: StockMovement[], threshold: number): SkuRow[] {
   const lastMovement = new Map<string, string>();
