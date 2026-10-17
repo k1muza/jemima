@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
+import { suggestProductName } from "@/app/dashboard/products/actions";
 import { processPhoto } from "@/lib/inventory/colour";
 import { plural } from "@/lib/inventory/format";
 
@@ -28,6 +29,33 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const targetRef = useRef<UploadTarget>("new");
   const [dragging, setDragging] = useState(false);
+  // Products already sent for a name suggestion this session: one call per product.
+  const namedRef = useRef(new Set<string>());
+
+  /**
+   * Fill an empty product name from the photo in the background. Never blocks
+   * the upload, and never overwrites a name the user has typed (or typed and
+   * cleared) while the suggestion was in flight.
+   */
+  const suggestName = useCallback(
+    (productId: string, dataUrl: string) => {
+      const nameOf = (s = store.getState()) => s.products.find((p) => p.id === productId)?.name;
+      if (namedRef.current.has(productId) || nameOf() !== "") return;
+      namedRef.current.add(productId);
+
+      let touched = false;
+      const unsubscribe = store.subscribe((s, prev) => {
+        if (s.products !== prev.products && nameOf(s)) touched = true;
+      });
+      suggestProductName(dataUrl)
+        .then((name) => {
+          if (name && !touched && nameOf() === "") store.getState().updateProduct(productId, { name });
+        })
+        .catch(() => {})
+        .finally(unsubscribe);
+    },
+    [store],
+  );
 
   const addFiles = useCallback(
     async (target: UploadTarget, list: FileList | File[] | null) => {
@@ -52,6 +80,7 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
         try {
           const { dataUrl, hex } = await processPhoto(file);
           addPhoto(productId, dataUrl, hex);
+          suggestName(productId, dataUrl);
         } catch {
           failed++;
         } finally {
@@ -60,7 +89,7 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
       }
       if (failed) toast.error(`Couldn't read ${plural(failed, "photo")}.`);
     },
-    [router, store],
+    [router, store, suggestName],
   );
 
   const pick = useCallback((target: UploadTarget) => {
