@@ -11,7 +11,7 @@ export const SIZE_TEMPLATES: Record<Category, string[]> = {
  * How a variant's colour was set. Detection never overwrites `corrected`;
  * `unavailable` means detection was off or failed for its photos.
  */
-export type ColourStatus = "detected" | "corrected" | "unavailable";
+export type ColourStatus = "detected" | "needs_review" | "corrected" | "unavailable";
 
 /** One colour + style combination of a product (spec: ProductVariant). */
 export type Variant = {
@@ -76,9 +76,22 @@ export type StockMovement = {
   note: string;
   actor: string;
   at: string;
+  /** Names copied at the time of the change, so history reads well after deletions. */
+  productName?: string;
+  colourName?: string;
+  styleLabel?: string;
 };
 
 export type StaffRole = "Owner" | "Staff";
+
+/** What the signed-in person may do (enforced by the database; mirrored here for the UI). */
+export type Access = {
+  role: "owner" | "staff" | "pending";
+  canViewCosts: boolean;
+  canEditPrices: boolean;
+};
+
+export const FULL_ACCESS: Access = { role: "owner", canViewCosts: true, canEditPrices: true };
 
 export type StaffMember = {
   id: string;
@@ -87,7 +100,8 @@ export type StaffMember = {
   role: StaffRole;
   canViewCosts: boolean;
   canEditPrices: boolean;
-  status: "active" | "invited";
+  /** pending = signed up without an invite, waiting for the owner to approve. */
+  status: "active" | "invited" | "pending";
 };
 
 export type ShopSettings = {

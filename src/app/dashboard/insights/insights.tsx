@@ -10,7 +10,7 @@ import { csvDate, csvMoney, downloadCsv } from "@/lib/inventory/csv";
 import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
 import { productUnits, qtyOf, sumOf } from "@/lib/inventory/stock";
 import { CATEGORIES, type Product } from "@/lib/inventory/types";
-import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
+import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
 type Totals = { units: number; cost: number; retail: number };
 
@@ -28,7 +28,19 @@ const poolMargin = (t: Totals) => (t.retail > 0 ? (t.retail - t.cost) / t.retail
 
 export function Insights() {
   const hydrated = useInventoryHydrated();
+  const { canViewCosts } = useAccess();
   if (!hydrated) return <InsightsSkeleton />;
+  if (!canViewCosts) {
+    return (
+      <>
+        <PageHeader eyebrow="Current stock only · no sales data" title="Insights" />
+        <Panel className="max-w-xl p-7 text-sm leading-normal text-muted-foreground">
+          Insights are built on unit costs, which your account can&apos;t see. Ask the owner for cost access under Settings →
+          Staff &amp; permissions.
+        </Panel>
+      </>
+    );
+  }
   return <InsightsContent />;
 }
 
@@ -84,7 +96,15 @@ function InsightsContent() {
   const exportCsv = () =>
     downloadCsv(
       `valuation-${csvDate()}.csv`,
-      ["Category", "Type", "Units", "Stock at cost (USD)", "Potential retail (USD)", "Potential gross profit (USD)", "Potential margin %"],
+      [
+        "Category",
+        "Type",
+        "Units",
+        "Stock at cost (USD)",
+        "Potential retail (USD)",
+        "Potential gross profit (USD)",
+        "Potential margin %",
+      ],
       data.groups.flatMap((g) =>
         g.types.map((t) => [
           g.category,
@@ -162,7 +182,9 @@ function InsightsContent() {
             {data.groups.map((g) => (
               <tbody key={g.category}>
                 <tr className="bg-secondary/60 font-medium">
-                  <th scope="rowgroup" className="px-[22px] py-2.5 text-left">{g.category}</th>
+                  <th scope="rowgroup" className="px-[22px] py-2.5 text-left">
+                    {g.category}
+                  </th>
                   <td className="py-2.5 pr-4 text-right tabular-nums">{formatNumber(g.units)}</td>
                   <td className="py-2.5 pr-4 tabular-nums">{formatMoney(g.cost)}</td>
                   <td className="py-2.5 pr-4 text-right tabular-nums">{formatMoney(g.retail)}</td>
@@ -171,7 +193,9 @@ function InsightsContent() {
                 </tr>
                 {g.types.map((t) => (
                   <tr key={t.type} className="border-t border-line-soft">
-                    <th scope="row" className="px-[22px] py-2.5 text-left font-normal">{t.type}</th>
+                    <th scope="row" className="px-[22px] py-2.5 text-left font-normal">
+                      {t.type}
+                    </th>
                     <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{formatNumber(t.units)}</td>
                     <td className="py-2.5 pr-4">
                       <Bar
@@ -183,8 +207,12 @@ function InsightsContent() {
                       />
                     </td>
                     <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{formatMoney(t.retail)}</td>
-                    <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">{formatMoney(t.retail - t.cost)}</td>
-                    <td className="py-2.5 pr-[22px] text-right text-muted-foreground tabular-nums">{formatPercent(poolMargin(t))}</td>
+                    <td className="py-2.5 pr-4 text-right text-muted-foreground tabular-nums">
+                      {formatMoney(t.retail - t.cost)}
+                    </td>
+                    <td className="py-2.5 pr-[22px] text-right text-muted-foreground tabular-nums">
+                      {formatPercent(poolMargin(t))}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -232,7 +260,10 @@ function InsightsContent() {
 
         <div className="flex min-w-0 flex-[1_1_320px] flex-col gap-3.5">
           <Panel className="grid grid-cols-2 divide-x divide-line-soft">
-            <Link href="/dashboard/inventory" className="flex flex-col gap-1 px-[22px] py-5 hover:bg-[#faf7f2] hover:text-foreground">
+            <Link
+              href="/dashboard/inventory"
+              className="flex flex-col gap-1 px-[22px] py-5 hover:bg-[#faf7f2] hover:text-foreground"
+            >
               <span className="flex items-center gap-1.5 text-xs text-out-fg">
                 <span className="size-2 rounded-full bg-out-fg" aria-hidden />
                 Sold out
@@ -240,7 +271,10 @@ function InsightsContent() {
               <span className="font-serif text-4xl leading-none">{formatNumber(data.soldOut)}</span>
               <span className="text-xs text-subtle">items at 0</span>
             </Link>
-            <Link href="/dashboard/inventory" className="flex flex-col gap-1 px-[22px] py-5 hover:bg-[#faf7f2] hover:text-foreground">
+            <Link
+              href="/dashboard/inventory"
+              className="flex flex-col gap-1 px-[22px] py-5 hover:bg-[#faf7f2] hover:text-foreground"
+            >
               <span className="flex items-center gap-1.5 text-xs text-low-fg">
                 <span className="size-2 rounded-full bg-low-fg" aria-hidden />
                 Low stock
@@ -266,7 +300,11 @@ function InsightsContent() {
                       <Swatch hex={variant.colourHex} className="size-3" />
                       <span className="truncate">
                         <span className="font-medium">{product.name}</span>
-                        <span className="text-subtle"> · {variant.colourName}{variant.style && ` ${variant.style}`}</span>
+                        <span className="text-subtle">
+                          {" "}
+                          · {variant.colourName}
+                          {variant.style && ` ${variant.style}`}
+                        </span>
                       </span>
                     </span>
                     <span className="shrink-0 font-mono text-xs text-out-fg">
@@ -276,7 +314,9 @@ function InsightsContent() {
                 </li>
               ))}
               {!data.missing.length && (
-                <li className="border-t border-line-soft px-[22px] py-5 text-sm text-subtle">Every colour has every size in stock.</li>
+                <li className="border-t border-line-soft px-[22px] py-5 text-sm text-subtle">
+                  Every colour has every size in stock.
+                </li>
               )}
             </ul>
           </Panel>
@@ -284,24 +324,32 @@ function InsightsContent() {
       </div>
 
       <p className="text-xs leading-normal text-subtle">
-        Figures use each product&apos;s current unit cost and selling price. Profit and margin are <em>potential</em>: there are no
-        sales records, so nothing here is realised revenue or earnings.
+        Figures use each product&apos;s current unit cost and selling price. Profit and margin are <em>potential</em>: there are
+        no sales records, so nothing here is realised revenue or earnings.
       </p>
     </>
   );
 }
 
 /** Single-measure horizontal bar: thin, rounded data end, recessive track, value as text beside it. */
-function Bar({ value, max, label, detail, display }: { value: number; max: number; label: string; detail: string; display: string }) {
+function Bar({
+  value,
+  max,
+  label,
+  detail,
+  display,
+}: {
+  value: number;
+  max: number;
+  label: string;
+  detail: string;
+  display: string;
+}) {
   const pct = Math.max(0, (value / max) * 100);
   return (
     <div className="flex items-center gap-3">
       <Tooltip>
-        <TooltipTrigger
-          render={
-            <div className="flex h-5 flex-1 items-center" aria-label={`${label}: ${detail}`} role="img" />
-          }
-        >
+        <TooltipTrigger render={<div className="flex h-5 flex-1 items-center" aria-label={`${label}: ${detail}`} role="img" />}>
           <div className="h-2 w-full overflow-hidden rounded-r bg-line-soft">
             <div className="h-full rounded-r bg-primary" style={{ width: `${pct}%` }} />
           </div>

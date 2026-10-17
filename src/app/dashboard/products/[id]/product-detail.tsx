@@ -14,7 +14,7 @@ import { formatMoney, formatPercent } from "@/lib/inventory/format";
 import { margin } from "@/lib/inventory/stock";
 import { CATEGORIES, type Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
-import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
+import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 import { useDropTarget } from "@/providers/photo-upload-provider";
 
 import { PhotosSection } from "./photos-section";
@@ -68,12 +68,16 @@ function DetailBar({ product }: { product: Product }) {
   const index = order.indexOf(product.id);
   const go = (delta: number) => router.push(`/dashboard/products/${order[(index + delta + order.length) % order.length]}`);
 
-  const navButton = "flex size-[34px] items-center justify-center rounded-lg border bg-card text-[15px] transition-colors hover:border-foreground";
+  const navButton =
+    "flex size-[34px] items-center justify-center rounded-lg border bg-card text-[15px] transition-colors hover:border-foreground";
 
   return (
     <div className="sticky top-14 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-background/94 py-4 backdrop-blur-sm md:top-0">
       <div className="flex items-center gap-1.5">
-        <Link href="/dashboard/products" className="py-1.5 pr-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground hover:text-foreground">
+        <Link
+          href="/dashboard/products"
+          className="py-1.5 pr-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground hover:text-foreground"
+        >
           ← All products
         </Link>
         <span className="mx-2 h-5 w-px bg-border" />
@@ -174,46 +178,58 @@ function DetailsSection({ product }: { product: Product }) {
 
 function PricingSection({ product }: { product: Product }) {
   const updateProduct = useInventory((s) => s.updateProduct);
+  const access = useAccess();
   const m = margin(product);
   const costShare = product.priceCents ? Math.min(100, (product.costCents / product.priceCents) * 100) : 0;
   const profitShare = product.priceCents ? Math.max(0, 100 - costShare) : 0;
 
   return (
     <section className="flex flex-col gap-3.5">
-      <h2 className="font-serif text-[30px] font-normal">Pricing</h2>
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 className="font-serif text-[30px] font-normal">Pricing</h2>
+        {!access.canEditPrices && <span className="text-xs text-subtle">Only people with price access can change these.</span>}
+      </div>
       <div className="grid grid-cols-2 items-stretch gap-3.5 xl:grid-cols-3">
-        <label className={fieldLabel}>
-          Cost per unit
-          <MoneyInput
-            cents={product.costCents}
-            onCents={(costCents) => updateProduct(product.id, { costCents })}
-            className="h-12 rounded-[10px] px-3.5 text-lg"
-            inputClassName="text-xl text-foreground"
-          />
-        </label>
+        {access.canViewCosts && (
+          <label className={fieldLabel}>
+            Cost per unit
+            <MoneyInput
+              disabled={!access.canEditPrices}
+              cents={product.costCents}
+              onCents={(costCents) => updateProduct(product.id, { costCents })}
+              className="h-12 rounded-[10px] px-3.5 text-lg"
+              inputClassName="text-xl text-foreground"
+            />
+          </label>
+        )}
         <label className={fieldLabel}>
           Selling price
           <MoneyInput
+            disabled={!access.canEditPrices}
             cents={product.priceCents}
             onCents={(priceCents) => updateProduct(product.id, { priceCents })}
             className="h-12 rounded-[10px] px-3.5 text-lg"
             inputClassName="text-xl font-medium text-foreground"
           />
         </label>
-        <div className="col-span-2 flex flex-col justify-end gap-2 xl:col-span-1">
-          <div className="flex items-baseline justify-between gap-3">
-            <span className={cn("font-serif text-4xl leading-none", m != null && m < 0 && "text-destructive")}>
-              {formatPercent(m)}
-            </span>
-            <span className="text-xs text-subtle">
-              {m == null ? "Set a price to see margin" : `${formatMoney(product.priceCents - product.costCents)} potential profit per unit`}
-            </span>
+        {access.canViewCosts && (
+          <div className="col-span-2 flex flex-col justify-end gap-2 xl:col-span-1">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className={cn("font-serif text-4xl leading-none", m != null && m < 0 && "text-destructive")}>
+                {formatPercent(m)}
+              </span>
+              <span className="text-xs text-subtle">
+                {m == null
+                  ? "Set a price to see margin"
+                  : `${formatMoney(product.priceCents - product.costCents)} potential profit per unit`}
+              </span>
+            </div>
+            <div className="flex h-2 overflow-hidden rounded bg-muted" aria-hidden>
+              <div className="bg-[#b9afa1]" style={{ width: `${costShare}%` }} />
+              <div className="bg-rose" style={{ width: `${profitShare}%` }} />
+            </div>
           </div>
-          <div className="flex h-2 overflow-hidden rounded bg-muted" aria-hidden>
-            <div className="bg-[#b9afa1]" style={{ width: `${costShare}%` }} />
-            <div className="bg-rose" style={{ width: `${profitShare}%` }} />
-          </div>
-        </div>
+        )}
       </div>
     </section>
   );

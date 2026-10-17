@@ -91,7 +91,10 @@ export function MoneyInput({
           onCents(parsed);
         }}
         onBlur={() => setText(centsToDollars(cents))}
-        className={cn("w-full min-w-0 border-none bg-transparent tabular-nums outline-none", inputClassName)}
+        className={cn(
+          "w-full min-w-0 border-none bg-transparent tabular-nums outline-none disabled:cursor-not-allowed disabled:opacity-60",
+          inputClassName,
+        )}
         {...props}
       />
     </span>

@@ -23,10 +23,15 @@ export function MovementList({
   return (
     <ol className="flex flex-col">
       {movements.map((m) => {
-        const product = byId.get(m.productId);
-        const variant = product?.variants.find((v) => v.id === m.variantId);
+        const product = byId.get(m.productId) ?? (m.productName ? ({ name: m.productName } as Product) : undefined);
+        const liveVariant = byId.get(m.productId)?.variants.find((v) => v.id === m.variantId);
+        // Fall back to the names saved with the movement when the colour row was removed.
+        const variant = liveVariant ?? (m.colourName ? { colourName: m.colourName, style: m.styleLabel ?? "" } : undefined);
         return (
-          <li key={m.id} className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 border-t border-line-soft px-[22px] py-3">
+          <li
+            key={m.id}
+            className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-0.5 border-t border-line-soft px-[22px] py-3"
+          >
             <span className="min-w-0 truncate text-sm font-medium">
               {showItem ? (
                 <>

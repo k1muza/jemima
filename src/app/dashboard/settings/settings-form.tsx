@@ -12,9 +12,10 @@ import { csvDate, csvMoney, downloadCsv } from "@/lib/inventory/csv";
 import { productUnits } from "@/lib/inventory/stock";
 import { CATEGORIES, type Category } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
-import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
+import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
-const inputClass = "h-10 rounded-[9px] border bg-card px-3 text-sm focus:border-foreground focus:outline-none disabled:bg-secondary disabled:text-muted-foreground";
+const inputClass =
+  "h-10 rounded-[9px] border bg-card px-3 text-sm focus:border-foreground focus:outline-none disabled:bg-secondary disabled:text-muted-foreground";
 
 export function SettingsForm() {
   const hydrated = useInventoryHydrated();
@@ -28,6 +29,9 @@ function SettingsContent() {
   const threshold = useInventory((s) => s.threshold);
   const products = useInventory((s) => s.products);
   const { updateSettings, setThreshold, resetDemo } = useInventory((s) => s);
+  const isDemo = useInventory((s) => s.mode === "demo");
+  const access = useAccess();
+  const isOwner = access.role === "owner";
 
   const setList = (key: "sizeTemplates" | "productTypes", category: Category, list: string[]) =>
     updateSettings({ [key]: { ...settings[key], [category]: list } });
@@ -35,7 +39,17 @@ function SettingsContent() {
   const exportProducts = () =>
     downloadCsv(
       `products-${csvDate()}.csv`,
-      ["Name", "Category", "Type", "SKU", "Colours", "Sizes", "Units", "Unit cost (USD)", "Unit price (USD)"],
+      [
+        "Name",
+        "Category",
+        "Type",
+        "SKU",
+        "Colours",
+        "Sizes",
+        "Units",
+        ...(access.canViewCosts ? ["Unit cost (USD)"] : []),
+        "Unit price (USD)",
+      ],
       products.map((p) => [
         p.name,
         p.category,
@@ -44,139 +58,156 @@ function SettingsContent() {
         p.variants.map((v) => v.colourName + (v.style ? ` (${v.style})` : "")).join("; "),
         p.sizes.join(" "),
         productUnits(p),
-        csvMoney(p.costCents),
+        ...(access.canViewCosts ? [csvMoney(p.costCents)] : []),
         csvMoney(p.priceCents),
       ]),
     );
 
   return (
     <>
-      <PageHeader eyebrow="Saved automatically" title="Settings" />
+      <PageHeader eyebrow={isOwner ? "Saved automatically" : "View only"} title="Settings" />
+      {!isOwner && (
+        <div className="rounded-[10px] border bg-card px-4 py-3 text-[13px] text-muted-foreground">
+          Only the owner can change settings.
+        </div>
+      )}
 
-      <Section title="Store" description="Shown in the sidebar and on exports.">
-        <Field label="Store name">
-          <input
-            value={settings.shopName}
-            onChange={(e) => updateSettings({ shopName: e.target.value })}
-            placeholder="Jemima's Designs"
-            className={inputClass}
-          />
-        </Field>
-        <Field label="Currency" hint="Fixed to US dollars for now.">
-          <select disabled value="USD" className={inputClass}>
-            <option value="USD">USD — US dollar</option>
-          </select>
-        </Field>
-        <Field label="Logo" hint="Logo upload arrives with photo storage in Supabase." group>
-          <button type="button" disabled className={cn(buttonStyles.outline, "self-start opacity-50")}>
-            Upload logo
-          </button>
-        </Field>
-      </Section>
-
-      <Section title="Stock alerts" description="When a size counts as low stock across the dashboard, products and inventory.">
-        <Field label="Low-stock threshold" hint={`A size with 1–${threshold} units is low; 0 is sold out.`}>
-          <span className="flex items-center gap-2">
+      {/* Disables every control inside for non-owners (the database rejects their changes anyway). */}
+      <fieldset disabled={!isOwner} className="contents">
+        <Section title="Store" description="Shown in the sidebar and on exports.">
+          <Field label="Store name">
             <input
-              type="number"
-              min={0}
-              max={99}
-              value={threshold}
-              onChange={(e) => setThreshold(Number(e.target.value))}
-              className={cn(inputClass, "w-24 text-center font-mono")}
+              value={settings.shopName}
+              onChange={(e) => updateSettings({ shopName: e.target.value })}
+              placeholder="Jemima's Designs"
+              className={inputClass}
             />
-            <span className="text-sm text-muted-foreground">units per size</span>
-          </span>
-        </Field>
-        <Toggle
-          label="Require a note for corrections and damage"
-          hint="Staff must say why when they correct a count or write stock off."
-          checked={settings.requireNoteForCorrections}
-          onChange={(requireNoteForCorrections) => updateSettings({ requireNoteForCorrections })}
-        />
-      </Section>
+          </Field>
+          <Field label="Currency" hint="Fixed to US dollars for now.">
+            <select disabled value="USD" className={inputClass}>
+              <option value="USD">USD — US dollar</option>
+            </select>
+          </Field>
+          <Field label="Logo" hint="Logo upload arrives with photo storage in Supabase." group>
+            <button type="button" disabled className={cn(buttonStyles.outline, "self-start opacity-50")}>
+              Upload logo
+            </button>
+          </Field>
+        </Section>
+
+        <Section title="Stock alerts" description="When a size counts as low stock across the dashboard, products and inventory.">
+          <Field label="Low-stock threshold" hint={`A size with 1–${threshold} units is low; 0 is sold out.`}>
+            <span className="flex items-center gap-2">
+              <input
+                type="number"
+                min={0}
+                max={99}
+                value={threshold}
+                onChange={(e) => setThreshold(Number(e.target.value))}
+                className={cn(inputClass, "w-24 text-center font-mono")}
+              />
+              <span className="text-sm text-muted-foreground">units per size</span>
+            </span>
+          </Field>
+          <Toggle
+            label="Require a note for corrections and damage"
+            hint="Staff must say why when they correct a count or write stock off."
+            checked={settings.requireNoteForCorrections}
+            onChange={(requireNoteForCorrections) => updateSettings({ requireNoteForCorrections })}
+          />
+        </Section>
+
+        <Section
+          title="Size templates"
+          description="The sizes a new product starts with. Existing products keep their own sizes."
+        >
+          {CATEGORIES.map((category) => (
+            <Field key={category} label={category} group>
+              <ChipEditor
+                items={settings.sizeTemplates[category]}
+                onChange={(list) => setList("sizeTemplates", category, list)}
+                normalise={(v) => v.toUpperCase()}
+                placeholder="Add size"
+                mono
+                minItems={1}
+              />
+            </Field>
+          ))}
+        </Section>
+
+        <Section title="Product types" description="Suggested when naming a product's type, e.g. Dresses or Heels.">
+          {CATEGORIES.map((category) => (
+            <Field key={category} label={category} group>
+              <ChipEditor
+                items={settings.productTypes[category]}
+                onChange={(list) => setList("productTypes", category, list)}
+                normalise={(v) => v.charAt(0).toUpperCase() + v.slice(1)}
+                placeholder="Add type"
+              />
+            </Field>
+          ))}
+        </Section>
+
+        <Section title="Photos & colour detection" description="How uploaded photos are handled.">
+          <Toggle
+            label="Detect colours from photos"
+            hint="Off: new photos join the first colour row and you name colours yourself."
+            checked={settings.autoDetectColours}
+            onChange={(autoDetectColours) => updateSettings({ autoDetectColours })}
+          />
+          <Field label="Largest photo allowed" hint="Bigger files are skipped with a message.">
+            <span className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={settings.maxPhotoMb}
+                onChange={(e) => updateSettings({ maxPhotoMb: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })}
+                className={cn(inputClass, "w-24 text-center font-mono")}
+              />
+              <span className="text-sm text-muted-foreground">MB</span>
+            </span>
+          </Field>
+        </Section>
+      </fieldset>
+
+      {isOwner && <StaffSection isDemo={isDemo} />}
 
       <Section
-        title="Size templates"
-        description="The sizes a new product starts with. Existing products keep their own sizes."
+        title="Data"
+        description={
+          isDemo
+            ? "Demo mode: everything is stored in this browser only."
+            : "Your catalogue is stored in Supabase and shared with your staff."
+        }
       >
-        {CATEGORIES.map((category) => (
-          <Field key={category} label={category} group>
-            <ChipEditor
-              items={settings.sizeTemplates[category]}
-              onChange={(list) => setList("sizeTemplates", category, list)}
-              normalise={(v) => v.toUpperCase()}
-              placeholder="Add size"
-              mono
-              minItems={1}
-            />
-          </Field>
-        ))}
-      </Section>
-
-      <Section title="Product types" description="Suggested when naming a product's type, e.g. Dresses or Heels.">
-        {CATEGORIES.map((category) => (
-          <Field key={category} label={category} group>
-            <ChipEditor
-              items={settings.productTypes[category]}
-              onChange={(list) => setList("productTypes", category, list)}
-              normalise={(v) => v.charAt(0).toUpperCase() + v.slice(1)}
-              placeholder="Add type"
-            />
-          </Field>
-        ))}
-      </Section>
-
-      <Section title="Photos & colour detection" description="How uploaded photos are handled.">
-        <Toggle
-          label="Detect colours from photos"
-          hint="Off: new photos join the first colour row and you name colours yourself."
-          checked={settings.autoDetectColours}
-          onChange={(autoDetectColours) => updateSettings({ autoDetectColours })}
-        />
-        <Field label="Largest photo allowed" hint="Bigger files are skipped with a message.">
-          <span className="flex items-center gap-2">
-            <input
-              type="number"
-              min={1}
-              max={50}
-              value={settings.maxPhotoMb}
-              onChange={(e) => updateSettings({ maxPhotoMb: Math.max(1, Math.min(50, Number(e.target.value) || 1)) })}
-              className={cn(inputClass, "w-24 text-center font-mono")}
-            />
-            <span className="text-sm text-muted-foreground">MB</span>
-          </span>
-        </Field>
-      </Section>
-
-      <StaffSection />
-
-      <Section title="Data" description="Everything is stored in this browser until the catalogue moves to Supabase.">
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={exportProducts} className={buttonStyles.outline}>
             Export products CSV
           </button>
-          <ConfirmDialog
-            trigger={
-              <button type="button" className={cn(buttonStyles.outline, "text-destructive hover:border-destructive")}>
-                Reset demo data
-              </button>
-            }
-            title="Reset to the demo catalogue?"
-            description="Products, photos, stock history and settings in this browser go back to the demo defaults."
-            confirmLabel="Reset"
-            onConfirm={() => {
-              resetDemo();
-              router.push("/dashboard");
-            }}
-          />
+          {isDemo && (
+            <ConfirmDialog
+              trigger={
+                <button type="button" className={cn(buttonStyles.outline, "text-destructive hover:border-destructive")}>
+                  Reset demo data
+                </button>
+              }
+              title="Reset to the demo catalogue?"
+              description="Products, photos, stock history and settings in this browser go back to the demo defaults."
+              confirmLabel="Reset"
+              onConfirm={() => {
+                resetDemo();
+                router.push("/dashboard");
+              }}
+            />
+          )}
         </div>
       </Section>
     </>
   );
 }
 
-function StaffSection() {
+function StaffSection({ isDemo }: { isDemo: boolean }) {
   const staff = useInventory((s) => s.settings.staff);
   const { updateStaff, inviteStaff, removeStaff } = useInventory((s) => s);
   const [name, setName] = useState("");
@@ -187,9 +218,16 @@ function StaffSection() {
       title="Staff & permissions"
       description="Owners see everything. Staff can edit the catalogue and adjust stock; cost and price access is per person."
     >
-      <div className="rounded-[10px] border border-low-line bg-low-bg px-3.5 py-2.5 text-[13px] text-low-fg">
-        Demo: permissions are saved here and take effect once staff accounts are connected to Supabase.
-      </div>
+      {isDemo ? (
+        <div className="rounded-[10px] border border-low-line bg-low-bg px-3.5 py-2.5 text-[13px] text-low-fg">
+          Demo: permissions are saved in this browser only.
+        </div>
+      ) : (
+        <p className="text-[13px] leading-normal text-muted-foreground">
+          Invite someone by email; they get staff access when they sign up with that address. Anyone else who signs up waits here
+          until you approve them.
+        </p>
+      )}
       <div className="overflow-x-auto rounded-[10px] border">
         <table className="w-full min-w-[620px] text-sm">
           <thead>
@@ -198,26 +236,40 @@ function StaffSection() {
               <th className="py-2.5 pr-3 font-normal">Role</th>
               <th className="py-2.5 pr-3 font-normal">See costs</th>
               <th className="py-2.5 pr-3 font-normal">Edit prices</th>
-              <th className="py-2.5 pr-3.5 font-normal"><span className="sr-only">Actions</span></th>
+              <th className="py-2.5 pr-3.5 font-normal">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
             {staff.map((m) => {
               const owner = m.role === "Owner";
+              const waiting = m.status === "pending";
               return (
                 <tr key={m.id} className="border-t border-line-soft">
                   <td className="px-3.5 py-2.5">
                     <span className="flex flex-col">
                       <span className="font-medium">
                         {m.name}
-                        {m.status === "invited" && <span className="ml-2 rounded-full bg-secondary px-2 py-0.5 text-[11px] font-normal text-muted-foreground">Invited</span>}
+                        {m.status !== "active" && (
+                          <span
+                            className={cn(
+                              "ml-2 rounded-full px-2 py-0.5 text-[11px] font-normal",
+                              waiting ? "bg-low-bg text-low-fg" : "bg-secondary text-muted-foreground",
+                            )}
+                          >
+                            {waiting ? "Waiting for approval" : "Invited"}
+                          </span>
+                        )}
                       </span>
                       <span className="text-xs text-subtle">{m.email}</span>
                     </span>
                   </td>
                   <td className="py-2.5 pr-3">
                     {owner ? (
-                      <span className="rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground">Owner</span>
+                      <span className="rounded-full bg-primary px-2.5 py-0.5 text-xs font-medium text-primary-foreground">
+                        Owner
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">Staff</span>
                     )}
@@ -225,21 +277,35 @@ function StaffSection() {
                   <td className="py-2.5 pr-3">
                     <Switch
                       checked={owner || m.canViewCosts}
-                      disabled={owner}
-                      onCheckedChange={(canViewCosts) => updateStaff(m.id, { canViewCosts, canEditPrices: canViewCosts && m.canEditPrices })}
+                      disabled={owner || waiting}
+                      onCheckedChange={(canViewCosts) =>
+                        updateStaff(m.id, { canViewCosts, canEditPrices: canViewCosts && m.canEditPrices })
+                      }
                       aria-label={`${m.name} can see costs`}
                     />
                   </td>
                   <td className="py-2.5 pr-3">
                     <Switch
                       checked={owner || m.canEditPrices}
-                      disabled={owner || !m.canViewCosts}
+                      disabled={owner || waiting || !m.canViewCosts}
                       onCheckedChange={(canEditPrices) => updateStaff(m.id, { canEditPrices })}
                       aria-label={`${m.name} can edit prices`}
                     />
                   </td>
                   <td className="py-2.5 pr-3.5 text-right">
-                    {!owner && (
+                    {waiting && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          updateStaff(m.id, { status: "active" });
+                          toast(`${m.name} can now use the stock room`);
+                        }}
+                        className="rounded-lg bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground hover:bg-[#3a332c]"
+                      >
+                        Approve
+                      </button>
+                    )}
+                    {!owner && !waiting && (
                       <button
                         type="button"
                         onClick={() => {
@@ -272,7 +338,13 @@ function StaffSection() {
           setEmail("");
         }}
       >
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" aria-label="New staff name" className={cn(inputClass, "flex-[1_1_160px]")} />
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Name"
+          aria-label="New staff name"
+          className={cn(inputClass, "flex-[1_1_160px]")}
+        />
         <input
           type="email"
           value={email}
@@ -321,7 +393,17 @@ function Field({ label, hint, group, children }: { label: string; hint?: string;
   );
 }
 
-function Toggle({ label, hint, checked, onChange }: { label: string; hint: string; checked: boolean; onChange: (v: boolean) => void }) {
+function Toggle({
+  label,
+  hint,
+  checked,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
   return (
     <label className="flex items-start justify-between gap-4">
       <span className="flex flex-col gap-0.5">
@@ -364,7 +446,13 @@ function ChipEditor({
   return (
     <span className="flex flex-wrap items-center gap-1.5">
       {items.map((item) => (
-        <span key={item} className={cn("flex items-center gap-1 rounded-full border bg-card py-1 pr-1.5 pl-3 text-[13px] text-foreground", mono && "font-mono")}>
+        <span
+          key={item}
+          className={cn(
+            "flex items-center gap-1 rounded-full border bg-card py-1 pr-1.5 pl-3 text-[13px] text-foreground",
+            mono && "font-mono",
+          )}
+        >
           {item}
           <button
             type="button"

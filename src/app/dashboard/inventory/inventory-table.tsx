@@ -26,7 +26,7 @@ import { levelStatus, skuKey, skuRows, type SkuRow } from "@/lib/inventory/sku";
 import { margin } from "@/lib/inventory/stock";
 import { CATEGORIES, type Category } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
-import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
+import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
 type LevelFilter = "All" | "Low" | "Sold out" | "In stock";
 type CategoryFilter = "All" | Category;
@@ -46,8 +46,7 @@ const SORTS: { value: Sort; label: string }[] = [
   { value: "updated", label: "Recently updated" },
 ];
 
-const COLUMNS =
-  "grid-cols-[minmax(200px,1.6fr)_minmax(120px,1fr)_52px_128px_72px_72px_60px_104px_92px_32px]";
+const COLUMNS = "grid-cols-[minmax(200px,1.6fr)_minmax(120px,1fr)_52px_128px_72px_72px_60px_104px_92px_32px]";
 
 export function InventoryTable() {
   const hydrated = useInventoryHydrated();
@@ -65,10 +64,13 @@ function InventoryContent() {
   const [sort, setSort] = useState<Sort>("product");
   const [historyFor, setHistoryFor] = useState<SkuRow | null>(null);
 
+  const { canViewCosts } = useAccess();
   const all = useMemo(() => skuRows(products, movements, threshold), [products, movements, threshold]);
 
   const inScope = all.filter(
-    (r) => (category === "All" || r.product.category === category) && (matchesSearch(r.product, search) || r.code.toLowerCase().includes(search.trim().toLowerCase())),
+    (r) =>
+      (category === "All" || r.product.category === category) &&
+      (matchesSearch(r.product, search) || r.code.toLowerCase().includes(search.trim().toLowerCase())),
   );
   const rows = inScope.filter(LEVEL_FILTERS[level]).sort((a, b) => {
     switch (sort) {
@@ -90,7 +92,20 @@ function InventoryContent() {
   const exportCsv = () =>
     downloadCsv(
       `inventory-${csvDate()}.csv`,
-      ["SKU", "Product", "Category", "Type", "Colour", "Style", "Size", "Quantity", "Unit cost (USD)", "Unit price (USD)", "Status", "Last updated"],
+      [
+        "SKU",
+        "Product",
+        "Category",
+        "Type",
+        "Colour",
+        "Style",
+        "Size",
+        "Quantity",
+        ...(canViewCosts ? ["Unit cost (USD)"] : []),
+        "Unit price (USD)",
+        "Status",
+        "Last updated",
+      ],
       rows.map((r) => [
         r.code,
         r.product.name,
@@ -100,7 +115,7 @@ function InventoryContent() {
         r.variant.style,
         r.size,
         r.qty,
-        csvMoney(r.product.costCents),
+        ...(canViewCosts ? [csvMoney(r.product.costCents)] : []),
         csvMoney(r.product.priceCents),
         levelStatus[r.level],
         r.updatedAt,
@@ -176,16 +191,22 @@ function InventoryContent() {
             role="row"
             className={cn("sticky top-0 z-[2] grid items-center gap-3 border-b bg-card px-5 py-3 text-xs text-subtle", COLUMNS)}
           >
-            <span role="columnheader" className="sticky left-0 z-[3] -ml-5 bg-card pl-5">Product</span>
+            <span role="columnheader" className="sticky left-0 z-[3] -ml-5 bg-card pl-5">
+              Product
+            </span>
             <span role="columnheader">Colour · style</span>
             <span role="columnheader">Size</span>
             <span role="columnheader">Quantity</span>
             <span role="columnheader">Cost</span>
             <span role="columnheader">Price</span>
-            <span role="columnheader" className="text-right" title="Potential gross margin">Margin</span>
+            <span role="columnheader" className="text-right" title="Potential gross margin">
+              Margin
+            </span>
             <span role="columnheader">Status</span>
             <span role="columnheader">Updated</span>
-            <span role="columnheader" className="sr-only">History</span>
+            <span role="columnheader" className="sr-only">
+              History
+            </span>
           </div>
           {rows.map((row) => (
             <InventoryRow key={row.key} row={row} onHistory={() => setHistoryFor(row)} />
@@ -194,8 +215,8 @@ function InventoryContent() {
         </div>
       </Panel>
       <p className="-mt-4 text-xs text-subtle">
-        Showing {plural(rows.length, "item")} · {formatNumber(units)} units. Click a quantity to adjust it with a reason; every change is
-        kept in the history.
+        Showing {plural(rows.length, "item")} · {formatNumber(units)} units. Click a quantity to adjust it with a reason; every
+        change is kept in the history.
       </p>
 
       <Sheet open={historyFor !== null} onOpenChange={(open) => !open && setHistoryFor(null)}>
@@ -212,9 +233,7 @@ function InventoryContent() {
               <MovementList
                 showItem={false}
                 products={products}
-                movements={movements.filter(
-                  (m) => skuKey(m.productId, m.variantId, m.size) === historyFor.key,
-                )}
+                movements={movements.filter((m) => skuKey(m.productId, m.variantId, m.size) === historyFor.key)}
                 empty="No changes recorded for this item yet."
               />
             </>
@@ -239,7 +258,13 @@ function QtyStepper({ row, large }: { row: SkuRow; large?: boolean }) {
   );
   return (
     <span className="flex items-center gap-1">
-      <button type="button" onClick={() => adjust(target, -1, "other", "Quick adjust")} disabled={qty === 0} aria-label={`Remove one ${label}`} className={stepButton}>
+      <button
+        type="button"
+        onClick={() => adjust(target, -1, "other", "Quick adjust")}
+        disabled={qty === 0}
+        aria-label={`Remove one ${label}`}
+        className={stepButton}
+      >
         <Minus className="size-3.5" />
       </button>
       <AdjustStockPopover
@@ -259,7 +284,12 @@ function QtyStepper({ row, large }: { row: SkuRow; large?: boolean }) {
           </button>
         }
       />
-      <button type="button" onClick={() => adjust(target, 1, "restock", "Quick adjust")} aria-label={`Add one ${label}`} className={stepButton}>
+      <button
+        type="button"
+        onClick={() => adjust(target, 1, "restock", "Quick adjust")}
+        aria-label={`Add one ${label}`}
+        className={stepButton}
+      >
         <Plus className="size-3.5" />
       </button>
     </span>
@@ -272,7 +302,10 @@ function InventoryListItem({ row, onHistory }: { row: SkuRow; onHistory: () => v
   const photo = product.photos.find((ph) => ph.variantId === variant.id) ?? product.photos[0];
   return (
     <li className="flex items-center gap-3 border-t border-line-soft px-4 py-3 first:border-t-0">
-      <span className="h-12 w-10 shrink-0 overflow-hidden rounded-md" style={photoBackground(variant.colourHex, photo && images[photo.id])} />
+      <span
+        className="h-12 w-10 shrink-0 overflow-hidden rounded-md"
+        style={photoBackground(variant.colourHex, photo && images[photo.id])}
+      />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <Link href={`/dashboard/products/${product.id}`} className="truncate text-sm font-medium">
           {product.name || "Untitled product"}
@@ -284,7 +317,12 @@ function InventoryListItem({ row, onHistory }: { row: SkuRow; onHistory: () => v
         </span>
         <span className="text-[11px] text-subtle">
           {levelStatus[level]} ·{" "}
-          <button type="button" onClick={onHistory} aria-label={`Stock history for ${rowLabel(row)}`} className="underline underline-offset-2">
+          <button
+            type="button"
+            onClick={onHistory}
+            aria-label={`Stock history for ${rowLabel(row)}`}
+            className="underline underline-offset-2"
+          >
             History
           </button>
         </span>
@@ -295,15 +333,25 @@ function InventoryListItem({ row, onHistory }: { row: SkuRow; onHistory: () => v
 }
 
 function InventoryRow({ row, onHistory }: { row: SkuRow; onHistory: () => void }) {
+  const { canViewCosts } = useAccess();
   const images = useInventory((s) => s.images);
   const { product, variant, size, level } = row;
   const photo = product.photos.find((ph) => ph.variantId === variant.id) ?? product.photos[0];
   const label = rowLabel(row);
 
   return (
-    <div role="row" className={cn("group grid items-center gap-3 border-b border-line-soft px-5 py-2 text-sm hover:bg-[#faf7f2]", COLUMNS)}>
-      <span role="rowheader" className="sticky left-0 z-[1] -ml-5 flex min-w-0 items-center gap-3 bg-card py-0.5 pl-5 group-hover:bg-[#faf7f2]">
-        <span className="h-11 w-9 shrink-0 overflow-hidden rounded-md" style={photoBackground(variant.colourHex, photo && images[photo.id])} />
+    <div
+      role="row"
+      className={cn("group grid items-center gap-3 border-b border-line-soft px-5 py-2 text-sm hover:bg-[#faf7f2]", COLUMNS)}
+    >
+      <span
+        role="rowheader"
+        className="sticky left-0 z-[1] -ml-5 flex min-w-0 items-center gap-3 bg-card py-0.5 pl-5 group-hover:bg-[#faf7f2]"
+      >
+        <span
+          className="h-11 w-9 shrink-0 overflow-hidden rounded-md"
+          style={photoBackground(variant.colourHex, photo && images[photo.id])}
+        />
         <span className="flex min-w-0 flex-col gap-0.5">
           <Link href={`/dashboard/products/${product.id}`} className="truncate font-medium">
             {product.name || "Untitled product"}
@@ -318,17 +366,27 @@ function InventoryRow({ row, onHistory }: { row: SkuRow; onHistory: () => void }
           {variant.style && <span className="text-subtle"> · {variant.style}</span>}
         </span>
       </span>
-      <span role="cell" className="font-mono text-[13px] font-medium">{size}</span>
+      <span role="cell" className="font-mono text-[13px] font-medium">
+        {size}
+      </span>
       <span role="cell">
         <QtyStepper row={row} />
       </span>
-      <span role="cell" className="tabular-nums text-muted-foreground">{formatMoney(product.costCents)}</span>
-      <span role="cell" className="font-medium tabular-nums">{product.priceCents ? formatMoney(product.priceCents) : "—"}</span>
-      <span role="cell" className="text-right tabular-nums text-muted-foreground">{formatPercent(margin(product))}</span>
+      <span role="cell" className="tabular-nums text-muted-foreground">
+        {canViewCosts ? formatMoney(product.costCents) : "—"}
+      </span>
+      <span role="cell" className="font-medium tabular-nums">
+        {product.priceCents ? formatMoney(product.priceCents) : "—"}
+      </span>
+      <span role="cell" className="text-right tabular-nums text-muted-foreground">
+        {canViewCosts ? formatPercent(margin(product)) : "—"}
+      </span>
       <span role="cell">
         <StatusBadge status={levelStatus[level]} />
       </span>
-      <span role="cell" className="text-xs text-subtle">{formatDateTime(row.updatedAt)}</span>
+      <span role="cell" className="text-xs text-subtle">
+        {formatDateTime(row.updatedAt)}
+      </span>
       <span role="cell">
         <button
           type="button"

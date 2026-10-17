@@ -12,13 +12,26 @@ npm run dev
 
 Open http://localhost:3000. Signed-out visitors are redirected to `/login`.
 
-### Turning sign-in off
+### Two modes
 
-Sign-in is required by default. Set `AUTH_ENABLED=false` (in `.env.local`, or in Vercel followed by a redeploy) to open the dashboard to anyone with the URL; `/login` and `/signup` then redirect to the dashboard. Without Supabase keys, sign-in is always off (demo mode).
+| | **Live** (default) | **Demo** |
+|---|---|---|
+| When | Supabase keys set and `AUTH_ENABLED` not `false` | No Supabase keys, or `AUTH_ENABLED=false` |
+| Sign-in | Required | Off (`/login` redirects to the dashboard) |
+| Data | Shared Supabase database + Storage | Seeded catalogue in this browser only (localStorage + IndexedDB) |
 
-### Demo mode
+The database only answers signed-in staff, so switching sign-in off always means demo data — it never opens the real catalogue to the public. On Vercel, change `AUTH_ENABLED` and redeploy.
 
-Until real Supabase keys are in `.env.local`, the app runs in **demo mode**: no auth gate, a seeded demo catalogue, and every change saved in the browser (catalogue in localStorage, photos in IndexedDB). "Reset demo data" in the sidebar restores the seed. Setting the keys switches auth back on automatically.
+### Accounts and permissions
+
+- The **first account** to sign up becomes the **Owner** (full access, settings, staff).
+- People the Owner invites in **Settings → Staff & permissions** become **Staff** when they sign up with that email.
+- Anyone else who signs up is **waiting for approval** and sees no data until the Owner approves them.
+- Per person, the Owner chooses whether staff can **see costs** and **edit prices**. Both are enforced by the database (row-level security + triggers), not just hidden in the UI.
+
+### Data model (supabase/migrations)
+
+`products` → `product_variants` (colour + style) × `product_sizes` → `inventory_skus` (quantity per variant + size). `product_costs` holds unit cost separately so it can be hidden. `product_images` rows point at files in the private `product-images` bucket (shown via signed URLs). `stock_movements` is the append-only history: quantities change only through the `adjust_stock()` function, which updates the SKU and records the movement in one transaction, rejects negative stock, ignores retried requests, and rejects stale edits. Removing a size or colour with stock records the write-off; deleting a product with history archives it instead. Money is integer cents (USD).
 
 ### Database changes (hosted Supabase)
 
@@ -89,14 +102,14 @@ src/
   types/database.ts         # generated Supabase types
 supabase/
   config.toml
-  migrations/               # profiles table + RLS + sign-up trigger
+  migrations/               # profiles + roles, inventory schema, RLS, adjust_stock(), storage bucket
 ```
 
 ## Conventions
 
 - **Cache Components is on.** Anything reading cookies/session (`getCurrentUser()`, Supabase server queries) must render inside a `<Suspense>` boundary, otherwise the build fails. Keep layouts static and push session reads down into components.
 - **Auth checks:** `proxy.ts` does the optimistic redirect; still call `getCurrentUser()` in Server Actions and Route Handlers before touching data. RLS is the final line of defence.
-- **State:** the catalogue currently lives in the Zustand inventory store (`useInventory((s) => s.x)`), created per request via a provider, never as a module-level store. Pages render skeletons until `useInventoryHydrated()` is true. When Supabase is wired up, server data moves to Server Components and the store keeps client UI state (filters, layout).
+- **State:** pages read the Zustand inventory store (`useInventory((s) => s.x)`), created per request via a provider. In live mode it loads from Supabase ([src/lib/backend/supabase-inventory.ts](src/lib/backend/supabase-inventory.ts)) and saves each change in the background (typing is batched; removals with Undo are held ~6 s; a failed save shows an error and reloads). Pages render skeletons until `useInventoryHydrated()` is true; use `useAccess()` for cost/price permissions.
 - **Money** is stored as integer cents (`costCents`, `priceCents`), never floats.
 - **Design tokens** (ivory, charcoal, rose, stock-state colours) live in `src/app/globals.css`; the source design is in `design/`.
 - Next.js docs for this exact version live in `node_modules/next/dist/docs/` (see `AGENTS.md`).

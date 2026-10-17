@@ -1,20 +1,70 @@
 "use client";
 
-import { createContext, use, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
+import { createContext, use, useEffect, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import { useStore } from "zustand";
 
+import { createSupabaseInventory } from "@/lib/backend/supabase-inventory";
 import { photoDb } from "@/lib/inventory/photo-db";
-import { createInventoryStore, type InventoryStore, type InventoryStoreApi } from "@/stores/inventory-store";
+import { createClient } from "@/lib/supabase/client";
+import {
+  createInventoryStore,
+  type InventoryMode,
+  type InventoryStore,
+  type InventoryStoreApi,
+} from "@/stores/inventory-store";
 
 const InventoryStoreContext = createContext<InventoryStoreApi | null>(null);
 
-export function InventoryStoreProvider({ children }: { children: ReactNode }) {
-  const [store] = useState(createInventoryStore);
+/** Data older than this is refreshed when the tab regains focus (other staff may have made changes). */
+const STALE_MS = 60_000;
+
+export function InventoryStoreProvider({ mode, children }: { mode: InventoryMode; children: ReactNode }) {
+  const [store] = useState(() =>
+    createInventoryStore({
+      mode,
+      backend: mode === "supabase" ? createSupabaseInventory(createClient()) : undefined,
+      onError: (message) => toast.error(message),
+    }),
+  );
 
   useEffect(() => {
-    store.persist.rehydrate();
-    photoDb.all().then((images) => store.getState().setImages(images));
-  }, [store]);
+    let loadedAt = 0;
+    const load = async () => {
+      await store.getState().load();
+      loadedAt = Date.now();
+    };
+
+    Promise.resolve(store.persist.rehydrate()).then(() => {
+      if (mode === "demo") {
+        store.setState({ ready: true });
+        photoDb.all().then((images) => store.getState().setImages(images));
+      } else {
+        load();
+      }
+    });
+    if (mode === "demo") return;
+
+    const onVisibility = () => {
+      const state = store.getState();
+      if (document.visibilityState === "hidden") {
+        state.flushPending(); // save batched edits before the tab is backgrounded or closed
+      } else if (Date.now() - loadedAt > STALE_MS && !state.hasPending()) {
+        load();
+      }
+    };
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!store.getState().hasPending()) return;
+      store.getState().flushPending();
+      e.preventDefault(); // browser asks "Leave site? Changes may not be saved"
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("beforeunload", onBeforeUnload);
+    };
+  }, [store, mode]);
 
   return <InventoryStoreContext value={store}>{children}</InventoryStoreContext>;
 }
@@ -35,12 +85,12 @@ export function useInventoryApi() {
   return useInventoryStoreApi();
 }
 
-/** False until saved data has loaded from browser storage. Render skeletons until then. */
+/** False until data has loaded (browser storage or Supabase). Render skeletons until then. */
 export function useInventoryHydrated() {
-  const store = useInventoryStoreApi();
-  return useSyncExternalStore(
-    (onChange) => store.persist.onFinishHydration(onChange),
-    () => store.persist.hasHydrated(),
-    () => false,
-  );
+  return useInventory((s) => s.ready && !s.loadError && s.access.role !== "pending");
+}
+
+/** What the signed-in person may see and change. */
+export function useAccess() {
+  return useInventory((s) => s.access);
 }

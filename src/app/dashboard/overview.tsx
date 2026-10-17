@@ -15,18 +15,9 @@ import {
 } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
-import {
-  cellLevel,
-  lowCells,
-  margin,
-  productIssues,
-  productUnits,
-  qtyOf,
-  sumOf,
-  variantUnits,
-} from "@/lib/inventory/stock";
+import { cellLevel, lowCells, margin, productIssues, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
 import { CATEGORIES } from "@/lib/inventory/types";
-import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
+import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
 const RESTOCK_LIMIT = 10;
 
@@ -39,13 +30,15 @@ export function Overview() {
 function OverviewContent() {
   const products = useInventory((s) => s.products);
   const threshold = useInventory((s) => s.threshold);
+  const { canViewCosts } = useAccess();
   const images = useInventory((s) => s.images);
   const setQty = useInventory((s) => s.setQty);
   // Rows edited this visit stay put even once they rise above the threshold.
   const [kept, setKept] = useState<string[]>([]);
 
   const today = useMemo(
-    () => new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }).format(new Date()),
+    () =>
+      new Intl.DateTimeFormat("en-GB", { weekday: "long", day: "numeric", month: "short", year: "numeric" }).format(new Date()),
     [],
   );
 
@@ -62,6 +55,7 @@ function OverviewContent() {
         sub: `${plural(products.length, "product")} in ${plural(sumOf(products.map((p) => p.variants.length)), "colour/style row")}`,
       },
       {
+        costBased: true,
         label: "Stock value at cost",
         value: formatMoney(sumOf(products.map((p) => productUnits(p) * p.costCents))),
         sub: "What you paid for what is on the shelf",
@@ -72,6 +66,7 @@ function OverviewContent() {
         sub: "Potential, if everything sold at full price",
       },
       {
+        costBased: true,
         label: "Average margin",
         value: formatPercent(average(margins)),
         sub: `Potential · ${plural(lowCount, "size")} low on stock`,
@@ -127,13 +122,15 @@ function OverviewContent() {
       <PageHeader eyebrow={today} title="Overview" />
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3.5">
-        {stats.kpis.map((k) => (
-          <Panel key={k.label} className="flex flex-col gap-3.5 px-[22px] py-5">
-            <div className="text-[13px] text-muted-foreground">{k.label}</div>
-            <div className="font-serif text-5xl leading-none tracking-[-0.01em]">{k.value}</div>
-            <div className="text-xs text-subtle">{k.sub}</div>
-          </Panel>
-        ))}
+        {stats.kpis
+          .filter((k) => canViewCosts || !k.costBased)
+          .map((k) => (
+            <Panel key={k.label} className="flex flex-col gap-3.5 px-[22px] py-5">
+              <div className="text-[13px] text-muted-foreground">{k.label}</div>
+              <div className="font-serif text-5xl leading-none tracking-[-0.01em]">{k.value}</div>
+              <div className="text-xs text-subtle">{k.sub}</div>
+            </Panel>
+          ))}
       </div>
 
       <Panel className="flex flex-col gap-[18px] p-[22px]">
@@ -251,7 +248,7 @@ function OverviewContent() {
                 </div>
                 <div className="flex justify-between text-xs text-subtle">
                   <span>{c.retail} retail</span>
-                  <span>{c.margin} avg margin</span>
+                  {canViewCosts && <span>{c.margin} avg margin</span>}
                 </div>
               </div>
             ))}

@@ -1,18 +1,21 @@
 import Link from "next/link";
 import { Suspense, type CSSProperties } from "react";
 
+import { AccessGate } from "@/components/dashboard/access-gate";
 import { AppSidebar } from "@/components/dashboard/app-sidebar";
 import { UserMenu } from "@/components/dashboard/user-menu";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
+import { isAuthEnabled } from "@/lib/auth-config";
 import { InventoryStoreProvider } from "@/providers/inventory-store-provider";
 import { PhotoUploadProvider } from "@/providers/photo-upload-provider";
 
 // The shell is static and prerenders; only the session-dependent user menu
 // streams in behind Suspense. proxy.ts guards access.
+// With sign-in on, data comes from Supabase; with it off, the browser-only demo runs.
 export default function DashboardLayout({ children }: LayoutProps<"/dashboard">) {
   return (
-    <InventoryStoreProvider>
+    <InventoryStoreProvider mode={isAuthEnabled ? "supabase" : "demo"}>
       <PhotoUploadProvider>
         <SidebarProvider style={{ "--sidebar-width": "232px" } as CSSProperties}>
           <AppSidebar
@@ -31,7 +34,9 @@ export default function DashboardLayout({ children }: LayoutProps<"/dashboard">)
               </Link>
             </header>
             <main className="flex-1 px-4 pt-6 pb-20 md:px-12 md:pt-10">
-              <div className="mx-auto flex max-w-[1240px] flex-col gap-8">{children}</div>
+              <div className="mx-auto flex max-w-[1240px] flex-col gap-8">
+                <AccessGate>{children}</AccessGate>
+              </div>
             </main>
           </SidebarInset>
         </SidebarProvider>

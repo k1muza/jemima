@@ -21,6 +21,7 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
   const shopName = useInventory((s) => s.settings.shopName);
   const createProduct = useInventory((s) => s.createProduct);
   const resetDemo = useInventory((s) => s.resetDemo);
+  const isDemo = useInventory((s) => s.mode === "demo");
   const { pick } = usePhotoUpload();
 
   const close = () => setOpenMobile(false);
@@ -28,7 +29,11 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
   return (
     <Sidebar collapsible="offcanvas" className="border-none">
       <SidebarHeader className="px-6 pt-7 pb-0">
-        <Link href="/dashboard" onClick={close} className="flex flex-col gap-1 text-sidebar-foreground hover:text-sidebar-foreground">
+        <Link
+          href="/dashboard"
+          onClick={close}
+          className="flex flex-col gap-1 text-sidebar-foreground hover:text-sidebar-foreground"
+        >
           <span className="font-serif text-[30px] leading-none tracking-[-0.01em] italic">
             {(hydrated && shopName.trim()) || "Jemima's Designs"}
           </span>
@@ -69,21 +74,23 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
       <SidebarFooter className="gap-4 px-4 pt-4 pb-[22px]">
         <div className="flex flex-col gap-2.5 px-2.5 text-xs leading-normal text-dim">
           <span>Low stock: {threshold} or fewer in a size. Changes save automatically.</span>
-          <ConfirmDialog
-            trigger={
-              <button type="button" className="self-start text-left text-xs text-dim underline hover:text-sidebar-foreground">
-                Reset demo data
-              </button>
-            }
-            title="Reset to the demo catalogue?"
-            description="Your changes and uploaded photos in this browser will be removed."
-            confirmLabel="Reset"
-            onConfirm={() => {
-              resetDemo();
-              close();
-              router.push("/dashboard");
-            }}
-          />
+          {isDemo && (
+            <ConfirmDialog
+              trigger={
+                <button type="button" className="self-start text-left text-xs text-dim underline hover:text-sidebar-foreground">
+                  Reset demo data
+                </button>
+              }
+              title="Reset to the demo catalogue?"
+              description="Your changes and uploaded photos in this browser will be removed."
+              confirmLabel="Reset"
+              onConfirm={() => {
+                resetDemo();
+                close();
+                router.push("/dashboard");
+              }}
+            />
+          )}
         </div>
         {footer}
       </SidebarFooter>
@@ -99,8 +106,7 @@ function ActiveNavLinks(props: NavLinksProps) {
 
 function NavLinks({ pathname, count, onNavigate }: NavLinksProps & { pathname: string | null }) {
   const isActive = (href: string) =>
-    pathname !== null &&
-    (href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
+    pathname !== null && (href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
 
   return (
     <nav aria-label="Main" className="flex flex-col gap-0.5">

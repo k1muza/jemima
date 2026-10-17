@@ -22,7 +22,7 @@ import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventor
 import { margin, productStatus, productUnits, sumOf } from "@/lib/inventory/stock";
 import type { Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
-import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
+import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 import { useDropTarget, usePhotoUpload } from "@/providers/photo-upload-provider";
 
 export function Catalogue() {
@@ -148,7 +148,11 @@ function ProductCard({ product, threshold }: { product: Product; threshold: numb
   const photoCount = product.photos.length;
 
   return (
-    <Link href={`/dashboard/products/${product.id}`} {...drop.props} className="group flex min-w-0 flex-col gap-3 hover:text-foreground">
+    <Link
+      href={`/dashboard/products/${product.id}`}
+      {...drop.props}
+      className="group flex min-w-0 flex-col gap-3 hover:text-foreground"
+    >
       <PhotoFill
         hex={cover.hex}
         imageUrl={cover.imageUrl}
@@ -181,7 +185,9 @@ function ProductCard({ product, threshold }: { product: Product; threshold: numb
           <span className="text-xs text-subtle">{[product.type, product.category].filter(Boolean).join(" · ")}</span>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-[3px]">
-          <span className="font-serif text-[22px] leading-none">{product.priceCents ? formatMoney(product.priceCents) : "No price"}</span>
+          <span className="font-serif text-[22px] leading-none">
+            {product.priceCents ? formatMoney(product.priceCents) : "No price"}
+          </span>
           <span className={cn("text-xs tabular-nums", statusTextClass[status])}>
             {units ? `${formatNumber(units)} in stock` : "None in stock"}
           </span>
@@ -202,10 +208,14 @@ function ProductTable({ products, threshold }: { products: Product[]; threshold:
           <span role="columnheader">Product</span>
           <span role="columnheader">Category</span>
           <span role="columnheader">Colours</span>
-          <span role="columnheader" className="text-right">Units</span>
+          <span role="columnheader" className="text-right">
+            Units
+          </span>
           <span role="columnheader">Cost</span>
           <span role="columnheader">Price</span>
-          <span role="columnheader" className="text-right">Margin</span>
+          <span role="columnheader" className="text-right">
+            Margin
+          </span>
           <span role="columnheader">Status</span>
         </div>
         {products.map((p) => (
@@ -220,6 +230,7 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
   const router = useRouter();
   const images = useInventory((s) => s.images);
   const updateProduct = useInventory((s) => s.updateProduct);
+  const access = useAccess();
   const drop = useDropTarget(product.id);
   const status = productStatus(product, threshold);
   const cover = coverOf(product, images);
@@ -246,7 +257,9 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
           {product.sku || "no SKU"} · {product.type || "—"}
         </span>
       </span>
-      <span role="cell" className="text-muted-foreground">{product.category}</span>
+      <span role="cell" className="text-muted-foreground">
+        {product.category}
+      </span>
       <span role="cell" className="flex flex-wrap gap-1">
         {colourDots(product).map((d) => (
           <Swatch key={d.name} hex={d.hex} title={d.name} />
@@ -256,16 +269,22 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
         {formatNumber(productUnits(product))}
       </span>
       <span role="cell" onClick={stop}>
-        <MoneyInput
-          cents={product.costCents}
-          onCents={(costCents) => updateProduct(product.id, { costCents })}
-          aria-label={`Cost of ${product.name}`}
-          className="h-[34px] rounded-[7px] px-2.5"
-          inputClassName="text-sm"
-        />
+        {!access.canViewCosts ? (
+          <span className="text-subtle">Hidden</span>
+        ) : (
+          <MoneyInput
+            disabled={!access.canEditPrices}
+            cents={product.costCents}
+            onCents={(costCents) => updateProduct(product.id, { costCents })}
+            aria-label={`Cost of ${product.name}`}
+            className="h-[34px] rounded-[7px] px-2.5"
+            inputClassName="text-sm"
+          />
+        )}
       </span>
       <span role="cell" onClick={stop}>
         <MoneyInput
+          disabled={!access.canEditPrices}
           cents={product.priceCents}
           onCents={(priceCents) => updateProduct(product.id, { priceCents })}
           aria-label={`Price of ${product.name}`}
@@ -273,7 +292,9 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
           inputClassName="text-sm font-medium"
         />
       </span>
-      <span role="cell" className="text-right text-muted-foreground tabular-nums">{formatPercent(margin(product))}</span>
+      <span role="cell" className="text-right text-muted-foreground tabular-nums">
+        {access.canViewCosts ? formatPercent(margin(product)) : "—"}
+      </span>
       <span role="cell">
         <StatusBadge status={status} />
       </span>
