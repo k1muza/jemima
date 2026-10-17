@@ -14,14 +14,13 @@ import {
   Panel,
   photoBackground,
   Segmented,
-  StatusBadge,
   Swatch,
 } from "@/components/inventory/primitives";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { colourDots, coverOf, matchesSearch } from "@/lib/inventory/catalogue";
 import { csvDate, csvMoney, downloadCsv } from "@/lib/inventory/csv";
-import { formatDateTime, formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
+import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
 import { levelStatus, skuRows } from "@/lib/inventory/sku";
 import { cellLevel, margin, productStatus, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
 import { CATEGORIES, type Category, type Product, type StockStatus } from "@/lib/inventory/types";
@@ -58,7 +57,7 @@ const SORTS: { value: Sort; label: string }[] = [
 ];
 
 const COLUMNS =
-  "grid-cols-[minmax(220px,1.4fr)_minmax(96px,0.7fr)_minmax(220px,2fr)_56px_72px_72px_60px_104px_92px_68px]";
+  "grid-cols-[minmax(220px,1.4fr)_minmax(96px,0.7fr)_minmax(220px,2fr)_56px_72px_72px_60px_68px]";
 
 const sizeTotal = (product: Product, size: string) => sumOf(product.variants.map((v) => qtyOf(v, size)));
 
@@ -227,7 +226,7 @@ function InventoryContent() {
       </Panel>
 
       <Panel className="hidden max-h-[calc(100svh-260px)] min-h-[320px] overflow-auto md:block">
-        <div className="min-w-[1120px]" role="table" aria-label="Inventory by product">
+        <div className="min-w-[920px]" role="table" aria-label="Inventory by product">
           <div
             role="row"
             className={cn("sticky top-0 z-[2] grid items-center gap-3 border-b bg-card px-5 py-3 text-xs text-subtle", COLUMNS)}
@@ -247,8 +246,6 @@ function InventoryContent() {
             <span role="columnheader" className="text-right" title="Potential gross margin">
               Margin
             </span>
-            <span role="columnheader">Status</span>
-            <span role="columnheader">Updated</span>
             <span role="columnheader" className="sr-only">
               Actions
             </span>
@@ -422,7 +419,7 @@ type RowProps = { row: ProductRow; open: boolean; onToggle: () => void; onHistor
 
 function InventoryListItem({ row, open, onToggle, onHistory }: RowProps) {
   const images = useInventory((s) => s.images);
-  const { product, units, status } = row;
+  const { product, units } = row;
   const cover = coverOf(product, images);
   const name = product.name || "Untitled product";
   return (
@@ -435,9 +432,6 @@ function InventoryListItem({ row, open, onToggle, onHistory }: RowProps) {
           </Link>
           <span className="text-xs text-subtle">
             {plural(units, "unit")} · {row.sizesInStock} of {plural(product.sizes.length, "size")} in stock
-          </span>
-          <span>
-            <StatusBadge status={status} className="text-[11px]" />
           </span>
         </span>
         <HistoryButton onHistory={onHistory} name={name} />
@@ -455,7 +449,7 @@ function InventoryListItem({ row, open, onToggle, onHistory }: RowProps) {
 function InventoryRow({ row, open, onToggle, onHistory }: RowProps) {
   const { canViewCosts } = useAccess();
   const images = useInventory((s) => s.images);
-  const { product, units, status } = row;
+  const { product, units } = row;
   const cover = coverOf(product, images);
   const name = product.name || "Untitled product";
   const colours = colourDots(product);
@@ -501,12 +495,6 @@ function InventoryRow({ row, open, onToggle, onHistory }: RowProps) {
       </span>
       <span role="cell" className="text-right tabular-nums text-muted-foreground">
         {canViewCosts ? formatPercent(margin(product)) : "—"}
-      </span>
-      <span role="cell">
-        <StatusBadge status={status} />
-      </span>
-      <span role="cell" className="text-xs text-subtle">
-        {formatDateTime(row.updatedAt)}
       </span>
       <span role="cell" className="flex items-center">
         <HistoryButton onHistory={onHistory} name={name} />
