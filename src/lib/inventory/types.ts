@@ -82,6 +82,29 @@ export type StockMovement = {
   styleLabel?: string;
 };
 
+export type CataloguePageLayout = "Grid" | "Feature";
+
+/** A customer-facing catalogue (PDF / web page) built from a selection of products. */
+export type Catalogue = {
+  id: string;
+  /** Internal name; only staff see it. */
+  name: string;
+  /** Printed on the catalogue. */
+  title: string;
+  subtitle: string;
+  layout: CataloguePageLayout;
+  cover: boolean;
+  showPrices: boolean;
+  showColours: boolean;
+  hideSoldOut: boolean;
+  /** Chosen product ids. `null` = every priced product in stock. */
+  productIds: string[] | null;
+  /** Editor filters, remembered per catalogue. */
+  department: "All" | Category;
+  /** Lower-case colour names. */
+  colourFilter: string[];
+};
+
 export type StaffRole = "Owner" | "Staff";
 
 /** What the signed-in person may do (enforced by the database; mirrored here for the UI). */

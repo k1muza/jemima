@@ -11,6 +11,64 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      catalogues: {
+        Row: {
+          colour_filter: string[];
+          created_at: string;
+          created_by: string | null;
+          department: string;
+          hide_sold_out: boolean;
+          id: string;
+          layout: string;
+          name: string;
+          product_ids: string[] | null;
+          show_colours: boolean;
+          show_cover: boolean;
+          show_prices: boolean;
+          subtitle: string;
+          title: string;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        ComputedFields: never;
+        Insert: {
+          colour_filter?: string[];
+          created_at?: string;
+          created_by?: string | null;
+          department?: string;
+          hide_sold_out?: boolean;
+          id?: string;
+          layout?: string;
+          name?: string;
+          product_ids?: string[] | null;
+          show_colours?: boolean;
+          show_cover?: boolean;
+          show_prices?: boolean;
+          subtitle?: string;
+          title?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          colour_filter?: string[];
+          created_at?: string;
+          created_by?: string | null;
+          department?: string;
+          hide_sold_out?: boolean;
+          id?: string;
+          layout?: string;
+          name?: string;
+          product_ids?: string[] | null;
+          show_colours?: boolean;
+          show_cover?: boolean;
+          show_prices?: boolean;
+          subtitle?: string;
+          title?: string;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [];
+      };
       inventory_skus: {
         Row: {
           cost_override_cents: number | null;

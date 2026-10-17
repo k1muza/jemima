@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { QtyInput } from "@/components/inventory/inputs";
 import { cellLevelClasses, cellLevelLabel, Panel, photoBackground, Swatch } from "@/components/inventory/primitives";
 import { formatNumber } from "@/lib/inventory/format";
+import { nameColour } from "@/lib/inventory/colour";
 import { cellLevel, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
 import type { Product } from "@/lib/inventory/types";
 import { useInventory } from "@/providers/inventory-store-provider";
@@ -94,7 +95,22 @@ export function StockMatrix({ product }: { product: Product }) {
                 <div key={v.id} role="row" className="grid items-center gap-1 border-b border-line-soft px-[18px] py-2" style={{ gridTemplateColumns: columns }}>
                   <div role="rowheader" className="sticky left-0 z-[1] bg-card flex min-w-0 items-center gap-2 self-stretch">
                     <span className="h-[42px] w-[34px] shrink-0 overflow-hidden rounded-md" style={photoBackground(v.colourHex, photo && images[photo.id])} />
-                    <Swatch hex={v.colourHex} title={v.colourStatus === "corrected" ? "Colour (edited)" : "Detected colour"} className="size-3" />
+                    <label
+                      title="Pick this colour"
+                      className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-secondary focus-within:ring-2 focus-within:ring-ring"
+                    >
+                      <Swatch hex={v.colourHex} className="size-4" />
+                      <input
+                        type="color"
+                        value={v.colourHex}
+                        onChange={(e) => {
+                          const colourHex = e.target.value;
+                          updateVariant(product.id, v.id, { colourHex, colourName: nameColour(colourHex) });
+                        }}
+                        aria-label={`Pick colour for ${v.colourName || "this row"}`}
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                      />
+                    </label>
                     <span className="flex min-w-0 flex-1 flex-col">
                       <input
                         size={1}

@@ -3,6 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { seedSettings } from "@/lib/inventory/seed";
 import type {
   Access,
+  Catalogue,
+  CataloguePageLayout,
   Category,
   ColourStatus,
   Photo,
@@ -30,6 +32,7 @@ export type InventorySnapshot = {
   movements: StockMovement[];
   settings: ShopSettings;
   threshold: number;
+  catalogues: Catalogue[];
   /** Photo id → signed URL. */
   images: Record<string, string>;
 };
@@ -44,6 +47,42 @@ function need<T>(data: T | null): T {
 function check<T>(result: { data: T; error: { message: string } | null }): T {
   if (result.error) throw new Error(result.error.message);
   return result.data;
+}
+
+type CatalogueRow = Database["public"]["Tables"]["catalogues"]["Row"];
+
+const catalogueFromRow = (row: CatalogueRow): Catalogue => ({
+  id: row.id,
+  name: row.name,
+  title: row.title,
+  subtitle: row.subtitle,
+  layout: row.layout === "feature" ? "Feature" : "Grid",
+  cover: row.show_cover,
+  showPrices: row.show_prices,
+  showColours: row.show_colours,
+  hideSoldOut: row.hide_sold_out,
+  productIds: row.product_ids,
+  department: row.department === "Clothing" || row.department === "Shoes" ? row.department : "All",
+  colourFilter: row.colour_filter,
+});
+
+const layoutColumn = (layout: CataloguePageLayout) => (layout === "Feature" ? "feature" : "grid");
+
+/** Only the fields present in `c`, as column values. */
+function catalogueColumns(c: Partial<Omit<Catalogue, "id">>) {
+  return {
+    ...(c.name !== undefined && { name: c.name }),
+    ...(c.title !== undefined && { title: c.title }),
+    ...(c.subtitle !== undefined && { subtitle: c.subtitle }),
+    ...(c.layout !== undefined && { layout: layoutColumn(c.layout) }),
+    ...(c.cover !== undefined && { show_cover: c.cover }),
+    ...(c.showPrices !== undefined && { show_prices: c.showPrices }),
+    ...(c.showColours !== undefined && { show_colours: c.showColours }),
+    ...(c.hideSoldOut !== undefined && { hide_sold_out: c.hideSoldOut }),
+    ...(c.productIds !== undefined && { product_ids: c.productIds }),
+    ...(c.department !== undefined && { department: c.department }),
+    ...(c.colourFilter !== undefined && { colour_filter: c.colourFilter }),
+  };
 }
 
 const PRODUCT_SELECT = `
@@ -115,15 +154,25 @@ export function createSupabaseInventory(supabase: Client) {
     async load(): Promise<InventorySnapshot> {
       const { access, actor } = await loadAccess();
       if (access.role === "pending") {
-        return { access, actor, products: [], movements: [], settings: seedSettings(), threshold: 3, images: {} };
+        return {
+          access,
+          actor,
+          products: [],
+          movements: [],
+          settings: seedSettings(),
+          threshold: 3,
+          catalogues: [],
+          images: {},
+        };
       }
 
-      const [products, movements, shop, templates, types, staff] = await Promise.all([
+      const [products, movements, shop, templates, types, catalogues, staff] = await Promise.all([
         supabase.from("products").select(PRODUCT_SELECT).neq("status", "archived").order("created_at", { ascending: false }),
         supabase.from("stock_movements").select("*").order("created_at", { ascending: false }).limit(HISTORY_LIMIT),
         supabase.from("shop_settings").select("*").single(),
         supabase.from("size_templates").select("category, sizes"),
         supabase.from("product_types").select("category, name, sort_order").order("sort_order"),
+        supabase.from("catalogues").select("*").order("created_at"),
         access.role === "owner" ? loadStaff() : Promise.resolve<StaffMember[]>([]),
       ]);
 
@@ -222,6 +271,7 @@ export function createSupabaseInventory(supabase: Client) {
           staff,
         },
         threshold: s.low_stock_threshold,
+        catalogues: need(check(catalogues)).map(catalogueFromRow),
         images,
       };
     },
@@ -286,12 +336,16 @@ export function createSupabaseInventory(supabase: Client) {
         }),
       );
     },
-    async updateVariant(id: string, patch: { colourName?: string; style?: string; colourStatus?: ColourStatus }) {
+    async updateVariant(
+      id: string,
+      patch: { colourName?: string; colourHex?: string; style?: string; colourStatus?: ColourStatus },
+    ) {
       check(
         await supabase
           .from("product_variants")
           .update({
             ...(patch.colourName !== undefined && { colour_name: patch.colourName }),
+            ...(patch.colourHex !== undefined && { colour_hex: patch.colourHex }),
             ...(patch.style !== undefined && { style_label: patch.style }),
             ...(patch.colourStatus !== undefined && { colour_status: patch.colourStatus }),
           })
@@ -379,6 +433,17 @@ export function createSupabaseInventory(supabase: Client) {
       if (types.length) {
         check(await supabase.from("product_types").insert(types.map((name, i) => ({ category, name, sort_order: i }))));
       }
+    },
+
+    // ── Catalogues ──
+    async createCatalogue(c: Catalogue) {
+      check(await supabase.from("catalogues").insert({ id: c.id, ...catalogueColumns(c) }));
+    },
+    async updateCatalogue(id: string, patch: Partial<Omit<Catalogue, "id">>) {
+      check(await supabase.from("catalogues").update(catalogueColumns(patch)).eq("id", id));
+    },
+    async deleteCatalogue(id: string) {
+      check(await supabase.from("catalogues").delete().eq("id", id));
     },
 
     // ── Staff ──

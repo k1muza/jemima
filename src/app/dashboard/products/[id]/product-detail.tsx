@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Loader2, Sparkles } from "lucide-react";
 import { use, useState } from "react";
+import { toast } from "sonner";
 import { useShallow } from "zustand/react/shallow";
 
 import { ConfirmDialog } from "@/components/inventory/confirm-dialog";
@@ -16,7 +18,7 @@ import { margin } from "@/lib/inventory/stock";
 import { CATEGORIES, type Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
-import { useDropTarget } from "@/providers/photo-upload-provider";
+import { useDropTarget, usePhotoUpload } from "@/providers/photo-upload-provider";
 
 import { PhotosSection } from "./photos-section";
 import { StockHistory } from "./stock-history";
@@ -139,22 +141,46 @@ const fieldInput =
 
 function DetailsSection({ product }: { product: Product }) {
   const updateProduct = useInventory((s) => s.updateProduct);
+  const coverImage = useInventory((s) => s.images[product.photos[0]?.id]);
   const typeSuggestions = useInventory((s) => s.settings.productTypes[product.category]);
   const typeListId = `types-${product.id}`;
   const setCategory = useInventory((s) => s.setCategory);
   const products = useInventory((s) => s.products);
+  const { suggestName } = usePhotoUpload();
+  const [suggestingName, setSuggestingName] = useState(false);
   const suggestion = suggestSku(product, products);
+
+  const requestNameSuggestion = async () => {
+    if (!coverImage || suggestingName) return;
+    setSuggestingName(true);
+    const result = await suggestName(product.id, coverImage);
+    setSuggestingName(false);
+    if (result === "unavailable") toast.error("Couldn't suggest a name from this photo. Please try again.");
+  };
 
   return (
     <section className="flex flex-col gap-[18px]">
-      <input
-        value={product.name}
-        onChange={(e) => updateProduct(product.id, { name: e.target.value })}
-        placeholder="Name this product"
-        aria-label="Product name"
-        autoFocus={!product.name && !product.photos.length}
-        className="w-full border-b bg-transparent pb-2.5 font-serif text-[40px] leading-[1.05] tracking-[-0.015em] focus:border-foreground focus:outline-none md:text-5xl"
-      />
+      <div className="flex items-end gap-3">
+        <input
+          value={product.name}
+          onChange={(e) => updateProduct(product.id, { name: e.target.value })}
+          placeholder="Name this product"
+          aria-label="Product name"
+          autoFocus={!product.name && !product.photos.length}
+          className="min-w-0 flex-1 border-b bg-transparent pb-2.5 font-serif text-[40px] leading-[1.05] tracking-[-0.015em] focus:border-foreground focus:outline-none md:text-5xl"
+        />
+        <button
+          type="button"
+          onClick={requestNameSuggestion}
+          disabled={!coverImage || suggestingName}
+          aria-label="Suggest a product name from the cover photo"
+          title={coverImage ? "Suggest a name from the cover photo" : "Add a photo to suggest a name"}
+          className={cn(buttonStyles.outline, "mb-1 h-10 shrink-0 gap-2 px-3 disabled:cursor-not-allowed disabled:opacity-45")}
+        >
+          {suggestingName ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+          <span className="hidden sm:inline">{suggestingName ? "Suggesting…" : "Suggest"}</span>
+        </button>
+      </div>
       <div className="grid grid-cols-[repeat(auto-fit,minmax(170px,1fr))] gap-3.5">
         <div className={fieldLabel}>
           Category

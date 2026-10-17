@@ -2,6 +2,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { createStore } from "zustand/vanilla";
 
 import type { SupabaseInventory } from "@/lib/backend/supabase-inventory";
+import { newCatalogue } from "@/lib/catalogue/model";
 import { attachPhoto, nameColour, newVariant } from "@/lib/inventory/colour";
 import { photoDb } from "@/lib/inventory/photo-db";
 import { seedMovements, seedProducts, seedSettings } from "@/lib/inventory/seed";
@@ -10,6 +11,7 @@ import {
   FULL_ACCESS,
   reasonLabel,
   type Access,
+  type Catalogue,
   type Category,
   type MovementReason,
   type Product,
@@ -50,6 +52,10 @@ export type InventoryState = {
   images: Record<string, string>;
   /** Photos currently being processed for colour detection. */
   busy: number;
+  /** Customer-facing catalogues (PDF / web page), oldest first. */
+  catalogues: Catalogue[];
+  /** The catalogue open in the editor (falls back to the first). */
+  activeCatalogueId: string | null;
 };
 
 export type InventoryActions = {
@@ -80,7 +86,11 @@ export type InventoryActions = {
   ) => AdjustResult;
   /** Record the opposite movement (history is never edited). */
   reverseMovement: (movementId: string) => AdjustResult;
-  updateVariant: (productId: string, variantId: string, patch: Partial<Pick<Variant, "colourName" | "style">>) => void;
+  updateVariant: (
+    productId: string,
+    variantId: string,
+    patch: Partial<Pick<Variant, "colourName" | "colourHex" | "style">>,
+  ) => void;
   addPlainVariant: (productId: string) => void;
   removeVariant: (productId: string, variantId: string) => void;
   addSize: (productId: string, size: string) => boolean;
@@ -99,6 +109,14 @@ export type InventoryActions = {
   setFilter: (filter: CatalogueFilter) => void;
   setSearch: (search: string) => void;
   setSort: (sort: CatalogueSort) => void;
+
+  /** Create a catalogue (opened in the editor); returns its id. */
+  createCatalogue: (init?: Partial<Catalogue>) => string;
+  /** Make sure at least one catalogue exists (the first visit creates "All pieces"). */
+  ensureCatalogue: () => void;
+  updateCatalogue: (id: string, patch: Partial<Omit<Catalogue, "id">>) => void;
+  deleteCatalogue: (id: string) => void;
+  setActiveCatalogue: (id: string) => void;
 
   setThreshold: (threshold: number) => void;
   updateSettings: (patch: Partial<Omit<ShopSettings, "staff">>) => void;
@@ -225,7 +243,11 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
         };
 
         const productPatches = new Map<string, ProductPatch>();
-        const variantPatches = new Map<string, { colourName?: string; style?: string; colourStatus?: Variant["colourStatus"] }>();
+        const variantPatches = new Map<
+          string,
+          { colourName?: string; colourHex?: string; style?: string; colourStatus?: Variant["colourStatus"] }
+        >();
+        const cataloguePatches = new Map<string, Partial<Omit<Catalogue, "id">>>();
         let settingsDirty = false;
 
         const saveSettingsLater = () => {
@@ -255,6 +277,8 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           actor: "Jemima",
           images: {},
           busy: 0,
+          catalogues: [],
+          activeCatalogueId: null,
 
           load: async () => {
             if (!sync) return;
@@ -425,8 +449,8 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
             );
           },
           updateVariant: (productId, variantId, patch) => {
-            // A user-typed colour name is a correction: detection must not overwrite it.
-            const colourStatus = patch.colourName !== undefined ? ("corrected" as const) : undefined;
+            // A user-picked colour or typed name is a correction: detection must not overwrite it.
+            const colourStatus = patch.colourName !== undefined || patch.colourHex !== undefined ? ("corrected" as const) : undefined;
             editVariant(productId, variantId, (v) => ({ ...v, ...patch, colourStatus: colourStatus ?? v.colourStatus }));
             variantPatches.set(variantId, { ...variantPatches.get(variantId), ...patch, ...(colourStatus && { colourStatus }) });
             later(`variant:${variantId}:${productId}`, productId, TYPING_DEBOUNCE_MS, async () => {
@@ -577,6 +601,37 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           setSearch: (search) => set({ search }),
           setSort: (sort) => set({ sort }),
 
+          createCatalogue: (init) => {
+            const catalogue = newCatalogue(newId(), init);
+            set((s) => ({ catalogues: [...s.catalogues, catalogue], activeCatalogueId: catalogue.id }));
+            enqueue(`catalogue:${catalogue.id}`, () => sync!.createCatalogue(catalogue));
+            return catalogue.id;
+          },
+          ensureCatalogue: () => {
+            if (!get().catalogues.length) get().createCatalogue();
+          },
+          updateCatalogue: (id, patch) => {
+            set((s) => ({ catalogues: s.catalogues.map((c) => (c.id === id ? { ...c, ...patch } : c)) }));
+            cataloguePatches.set(id, { ...cataloguePatches.get(id), ...patch });
+            later(`catalogue:${id}`, `catalogue:${id}`, TYPING_DEBOUNCE_MS, async () => {
+              const pending = cataloguePatches.get(id);
+              cataloguePatches.delete(id);
+              if (pending) await sync!.updateCatalogue(id, pending);
+            });
+          },
+          deleteCatalogue: (id) => {
+            const rest = get().catalogues.filter((c) => c.id !== id);
+            if (!rest.length) return; // there's always at least one
+            set((s) => ({
+              catalogues: rest,
+              activeCatalogueId: s.activeCatalogueId === id ? rest[0].id : s.activeCatalogueId,
+            }));
+            cancelKeys((key) => key === `catalogue:${id}`);
+            cataloguePatches.delete(id);
+            enqueue(`catalogue:${id}`, () => sync!.deleteCatalogue(id));
+          },
+          setActiveCatalogue: (id) => set({ activeCatalogueId: id }),
+
           setThreshold: (threshold) => {
             set({ threshold: Math.max(0, Math.min(99, Math.floor(threshold) || 0)) });
             saveSettingsLater();
@@ -652,6 +707,8 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
               filter: "All",
               search: "",
               sort: "Newest",
+              catalogues: [newCatalogue(newId())],
+              activeCatalogueId: null,
             });
           },
         };
@@ -673,8 +730,10 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
                 sort: s.sort,
                 movements: s.movements,
                 settings: s.settings,
+                catalogues: s.catalogues,
+                activeCatalogueId: s.activeCatalogueId,
               }
-            : { layout: s.layout, filter: s.filter, sort: s.sort },
+            : { layout: s.layout, filter: s.filter, sort: s.sort, activeCatalogueId: s.activeCatalogueId },
       },
     ),
   );

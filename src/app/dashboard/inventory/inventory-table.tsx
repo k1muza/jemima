@@ -20,9 +20,9 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Skeleton } from "@/components/ui/skeleton";
 import { colourDots, coverOf, matchesSearch } from "@/lib/inventory/catalogue";
 import { csvDate, csvMoney, downloadCsv } from "@/lib/inventory/csv";
-import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
+import { formatMoney, formatNumber, plural } from "@/lib/inventory/format";
 import { levelStatus, skuRows } from "@/lib/inventory/sku";
-import { cellLevel, margin, productStatus, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
+import { cellLevel, productStatus, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
 import { CATEGORIES, type Category, type Product, type StockStatus } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
@@ -56,8 +56,12 @@ const SORTS: { value: Sort; label: string }[] = [
   { value: "updated", label: "Recently updated" },
 ];
 
-const COLUMNS =
-  "grid-cols-[minmax(220px,1.4fr)_minmax(96px,0.7fr)_minmax(220px,2fr)_56px_72px_72px_60px_68px]";
+// Colours, price and cost drop away as the viewport narrows so the table always fits.
+const COLUMNS = cn(
+  "grid-cols-[minmax(0,1.4fr)_minmax(0,2fr)_56px_68px]",
+  "lg:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,2fr)_56px_72px_68px]",
+  "xl:grid-cols-[minmax(0,1.4fr)_minmax(0,0.7fr)_minmax(0,2fr)_56px_72px_72px_68px]",
+);
 
 const sizeTotal = (product: Product, size: string) => sumOf(product.variants.map((v) => qtyOf(v, size)));
 
@@ -225,8 +229,8 @@ function InventoryContent() {
         {!rows.length && <div className="px-5 py-12 text-center text-sm text-subtle">No products match.</div>}
       </Panel>
 
-      <Panel className="hidden max-h-[calc(100svh-260px)] min-h-[320px] overflow-auto md:block">
-        <div className="min-w-[920px]" role="table" aria-label="Inventory by product">
+      <Panel className="hidden max-h-[calc(100svh-260px)] min-h-[320px] overflow-y-auto md:block">
+        <div role="table" aria-label="Inventory by product">
           <div
             role="row"
             className={cn("sticky top-0 z-[2] grid items-center gap-3 border-b bg-card px-5 py-3 text-xs text-subtle", COLUMNS)}
@@ -234,17 +238,20 @@ function InventoryContent() {
             <span role="columnheader" className="sticky left-0 z-[3] -ml-5 bg-card pl-5">
               Product
             </span>
-            <span role="columnheader">Colours</span>
+            <span role="columnheader" className="hidden lg:block">
+              Colours
+            </span>
             <span role="columnheader" title="Units per size, all colours combined">
               Sizes
             </span>
             <span role="columnheader" className="text-right">
               Units
             </span>
-            <span role="columnheader">Cost</span>
-            <span role="columnheader">Price</span>
-            <span role="columnheader" className="text-right" title="Potential gross margin">
-              Margin
+            <span role="columnheader" className="hidden xl:block">
+              Cost
+            </span>
+            <span role="columnheader" className="hidden lg:block">
+              Price
             </span>
             <span role="columnheader" className="sr-only">
               Actions
@@ -471,7 +478,7 @@ function InventoryRow({ row, open, onToggle, onHistory }: RowProps) {
           <span className="truncate font-mono text-[11px] text-subtle">{product.sku || "No SKU"}</span>
         </span>
       </span>
-      <span role="cell" className="flex min-w-0 items-center gap-2" title={colours.map((c) => c.name).join(", ")}>
+      <span role="cell" className="hidden min-w-0 items-center gap-2 lg:flex" title={colours.map((c) => c.name).join(", ")}>
         <span className="flex -space-x-1">
           {colours.slice(0, 4).map((c) => (
             <Swatch key={c.name} hex={c.hex} className="size-3.5 ring-2 ring-card" />
@@ -487,14 +494,11 @@ function InventoryRow({ row, open, onToggle, onHistory }: RowProps) {
       <span role="cell" className="text-right font-semibold tabular-nums">
         {formatNumber(units)}
       </span>
-      <span role="cell" className="tabular-nums text-muted-foreground">
+      <span role="cell" className="hidden tabular-nums text-muted-foreground xl:block">
         {canViewCosts ? formatMoney(product.costCents) : "—"}
       </span>
-      <span role="cell" className="font-medium tabular-nums">
+      <span role="cell" className="hidden font-medium tabular-nums lg:block">
         {product.priceCents ? formatMoney(product.priceCents) : "—"}
-      </span>
-      <span role="cell" className="text-right tabular-nums text-muted-foreground">
-        {canViewCosts ? formatPercent(margin(product)) : "—"}
       </span>
       <span role="cell" className="flex items-center">
         <HistoryButton onHistory={onHistory} name={name} />

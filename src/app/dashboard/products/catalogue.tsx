@@ -197,26 +197,41 @@ function ProductCard({ product, threshold }: { product: Product; threshold: numb
   );
 }
 
-const TABLE_COLUMNS = "grid-cols-[44px_minmax(220px,2fr)_84px_110px_70px_120px_120px_64px_104px]";
+// Columns drop away as the viewport narrows: category, cost and margin, then colours and status.
+const TABLE_COLUMNS = cn(
+  "grid-cols-[44px_minmax(0,1fr)_56px_100px]",
+  "lg:grid-cols-[44px_minmax(0,1fr)_110px_70px_120px_104px]",
+  "xl:grid-cols-[44px_minmax(0,1fr)_110px_70px_120px_120px_64px_104px]",
+  "2xl:grid-cols-[44px_minmax(0,2fr)_84px_110px_70px_120px_120px_64px_104px]",
+);
+const TABLE_ROW = "grid items-center gap-3 border-b px-3 sm:gap-4 sm:px-5";
 
 function ProductTable({ products, threshold }: { products: Product[]; threshold: number }) {
   return (
-    <Panel className="overflow-x-auto">
-      <div className="min-w-[1020px]" role="table" aria-label="Products">
-        <div role="row" className={cn("grid gap-4 border-b px-5 py-3 text-xs text-subtle", TABLE_COLUMNS)}>
+    <Panel>
+      <div role="table" aria-label="Products">
+        <div role="row" className={cn(TABLE_ROW, "py-3 text-xs text-subtle", TABLE_COLUMNS)}>
           <span role="columnheader" />
           <span role="columnheader">Product</span>
-          <span role="columnheader">Category</span>
-          <span role="columnheader">Colours</span>
+          <span role="columnheader" className="hidden 2xl:block">
+            Category
+          </span>
+          <span role="columnheader" className="hidden lg:block">
+            Colours
+          </span>
           <span role="columnheader" className="text-right">
             Units
           </span>
-          <span role="columnheader">Cost</span>
+          <span role="columnheader" className="hidden xl:block">
+            Cost
+          </span>
           <span role="columnheader">Price</span>
-          <span role="columnheader" className="text-right">
+          <span role="columnheader" className="hidden text-right xl:block">
             Margin
           </span>
-          <span role="columnheader">Status</span>
+          <span role="columnheader" className="hidden lg:block">
+            Status
+          </span>
         </div>
         {products.map((p) => (
           <ProductRow key={p.id} product={p} threshold={threshold} />
@@ -243,7 +258,8 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
       {...drop.props}
       onClick={() => router.push(href)}
       className={cn(
-        "grid cursor-pointer items-center gap-4 border-b border-line-soft px-5 py-[9px] text-sm transition-colors hover:bg-[#faf7f2]",
+        TABLE_ROW,
+        "cursor-pointer border-line-soft py-[9px] text-sm transition-colors hover:bg-[#faf7f2]",
         TABLE_COLUMNS,
         drop.over && "bg-rose-soft",
       )}
@@ -257,10 +273,10 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
           {product.sku || "no SKU"} · {product.type || "—"}
         </span>
       </span>
-      <span role="cell" className="text-muted-foreground">
+      <span role="cell" className="hidden text-muted-foreground 2xl:block">
         {product.category}
       </span>
-      <span role="cell" className="flex flex-wrap gap-1">
+      <span role="cell" className="hidden flex-wrap gap-1 lg:flex">
         {colourDots(product).map((d) => (
           <Swatch key={d.name} hex={d.hex} title={d.name} />
         ))}
@@ -268,7 +284,7 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
       <span role="cell" className={cn("text-right font-medium tabular-nums", statusTextClass[status])}>
         {formatNumber(productUnits(product))}
       </span>
-      <span role="cell" onClick={stop}>
+      <span role="cell" onClick={stop} className="hidden xl:block">
         {!access.canViewCosts ? (
           <span className="text-subtle">Hidden</span>
         ) : (
@@ -292,10 +308,10 @@ function ProductRow({ product, threshold }: { product: Product; threshold: numbe
           inputClassName="text-sm font-medium"
         />
       </span>
-      <span role="cell" className="text-right text-muted-foreground tabular-nums">
+      <span role="cell" className="hidden text-right text-muted-foreground tabular-nums xl:block">
         {access.canViewCosts ? formatPercent(margin(product)) : "—"}
       </span>
-      <span role="cell">
+      <span role="cell" className="hidden lg:block">
         <StatusBadge status={status} />
       </span>
     </div>

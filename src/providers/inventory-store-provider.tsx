@@ -37,6 +37,7 @@ export function InventoryStoreProvider({ mode, children }: { mode: InventoryMode
 
     Promise.resolve(store.persist.rehydrate()).then(() => {
       if (mode === "demo") {
+        store.getState().ensureCatalogue(); // first visit: start with "All pieces"
         store.setState({ ready: true });
         photoDb.all().then((images) => store.getState().setImages(images));
       } else {

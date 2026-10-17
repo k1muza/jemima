@@ -138,7 +138,7 @@ export function PageHeader({ eyebrow, title, actions }: { eyebrow: ReactNode; ti
         <div className="font-mono text-xs tracking-[0.06em] text-muted-foreground uppercase">{eyebrow}</div>
         <h1 className="font-serif text-5xl leading-[0.95] tracking-[-0.02em] md:text-[64px]">{title}</h1>
       </div>
-      {actions && <div className="flex gap-2">{actions}</div>}
+      {actions && <div className="flex flex-wrap gap-2">{actions}</div>}
     </header>
   );
 }

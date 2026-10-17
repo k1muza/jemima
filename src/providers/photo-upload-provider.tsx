@@ -16,6 +16,8 @@ type UploadTarget = string | "new";
 type PhotoUploadContextValue = {
   pick: (target: UploadTarget) => void;
   addFiles: (target: UploadTarget, files: FileList | File[] | null) => void;
+  /** Explicitly suggest a name from a product photo, replacing the current name. */
+  suggestName: (productId: string, image: string) => Promise<"updated" | "handled" | "unavailable">;
   /** True while files are being dragged anywhere over the window. */
   dragging: boolean;
 };
@@ -68,6 +70,46 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
         })
         .catch(() => {})
         .finally(unsubscribe);
+    },
+    [store],
+  );
+
+  const suggestNameManually = useCallback(
+    async (productId: string, image: string) => {
+      if (dailyLimitRef.current) return "handled" as const;
+      const nameOf = (s = store.getState()) => s.products.find((p) => p.id === productId)?.name;
+      const startingName = nameOf();
+      let touched = false;
+      const unsubscribe = store.subscribe((s, prev) => {
+        if (s.products !== prev.products && nameOf(s) !== startingName) touched = true;
+      });
+
+      try {
+        // Saved Supabase products use signed URLs, while the API accepts image data.
+        const dataUrl = image.startsWith("data:") ? image : await imageUrlToDataUrl(image);
+        const res = await fetch("/api/product-name", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ image: dataUrl }),
+          signal: AbortSignal.timeout(20_000),
+        });
+        const { name, dailyLimit } = (await res.json()) as NameSuggestion;
+        if (dailyLimit && !dailyLimitRef.current) {
+          dailyLimitRef.current = true;
+          const hours = dailyLimit.resetsInSeconds ? Math.max(1, Math.round(dailyLimit.resetsInSeconds / 3600)) : null;
+          toast("Daily limit reached for name suggestions", {
+            description: `Name products yourself for now${hours ? `; suggestions resume in about ${plural(hours, "hour")}` : ""}.`,
+          });
+        }
+        if (dailyLimit || touched || nameOf() !== startingName) return "handled" as const;
+        if (!name) return "unavailable" as const;
+        store.getState().updateProduct(productId, { name });
+        return "updated" as const;
+      } catch {
+        return "unavailable" as const;
+      } finally {
+        unsubscribe();
+      }
     },
     [store],
   );
@@ -135,7 +177,10 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const value = useMemo(() => ({ pick, addFiles, dragging }), [pick, addFiles, dragging]);
+  const value = useMemo(
+    () => ({ pick, addFiles, suggestName: suggestNameManually, dragging }),
+    [pick, addFiles, suggestNameManually, dragging],
+  );
 
   return (
     <PhotoUploadContext value={value}>
@@ -162,6 +207,23 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
       )}
     </PhotoUploadContext>
   );
+}
+
+function imageUrlToDataUrl(url: string) {
+  return fetch(url)
+    .then((res) => {
+      if (!res.ok) throw new Error("Could not load product photo");
+      return res.blob();
+    })
+    .then(
+      (blob) =>
+        new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(reader.error);
+          reader.readAsDataURL(blob);
+        }),
+    );
 }
 
 export function usePhotoUpload() {

@@ -17,6 +17,8 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
   const { setOpenMobile } = useSidebar();
   const hydrated = useInventoryHydrated();
   const productCount = useInventory((s) => s.products.length);
+  const catalogueCount = useInventory((s) => s.catalogues.length);
+  const counts = hydrated ? { products: productCount, catalogues: catalogueCount } : null;
   const threshold = useInventory((s) => s.threshold);
   const shopName = useInventory((s) => s.settings.shopName);
   const createProduct = useInventory((s) => s.createProduct);
@@ -43,8 +45,8 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
 
       <SidebarContent className="gap-[34px] px-4 pt-[34px]">
         {/* usePathname() is request data on dynamic routes, so it streams in behind Suspense. */}
-        <Suspense fallback={<NavLinks pathname={null} count={hydrated ? productCount : null} onNavigate={close} />}>
-          <ActiveNavLinks count={hydrated ? productCount : null} onNavigate={close} />
+        <Suspense fallback={<NavLinks pathname={null} counts={counts} onNavigate={close} />}>
+          <ActiveNavLinks counts={counts} onNavigate={close} />
         </Suspense>
 
         <div className="flex flex-col gap-2.5">
@@ -98,13 +100,13 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
   );
 }
 
-type NavLinksProps = { count: number | null; onNavigate: () => void };
+type NavLinksProps = { counts: Record<"products" | "catalogues", number> | null; onNavigate: () => void };
 
 function ActiveNavLinks(props: NavLinksProps) {
   return <NavLinks pathname={usePathname()} {...props} />;
 }
 
-function NavLinks({ pathname, count, onNavigate }: NavLinksProps & { pathname: string | null }) {
+function NavLinks({ pathname, counts, onNavigate }: NavLinksProps & { pathname: string | null }) {
   const isActive = (href: string) =>
     pathname !== null && (href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
 
@@ -124,7 +126,7 @@ function NavLinks({ pathname, count, onNavigate }: NavLinksProps & { pathname: s
             )}
           >
             <span>{item.title}</span>
-            {item.showCount && count !== null && <span className="font-mono text-[11px] text-dim">{count}</span>}
+            {item.count && counts && <span className="font-mono text-[11px] text-dim">{counts[item.count]}</span>}
           </Link>
         );
       })}
