@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { createContext, use, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { toast } from "sonner";
 
-import { suggestProductName } from "@/app/dashboard/products/actions";
+import type { NameSuggestion } from "@/lib/gemini";
 import { processPhoto } from "@/lib/inventory/colour";
 import { plural } from "@/lib/inventory/format";
 
@@ -31,6 +31,8 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
   const [dragging, setDragging] = useState(false);
   // Products already sent for a name suggestion this session: one call per product.
   const namedRef = useRef(new Set<string>());
+  // Set once Gemini reports its daily quota is used up; no more calls this session.
+  const dailyLimitRef = useRef(false);
 
   /**
    * Fill an empty product name from the photo in the background. Never blocks
@@ -40,15 +42,28 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
   const suggestName = useCallback(
     (productId: string, dataUrl: string) => {
       const nameOf = (s = store.getState()) => s.products.find((p) => p.id === productId)?.name;
-      if (namedRef.current.has(productId) || nameOf() !== "") return;
+      if (dailyLimitRef.current || namedRef.current.has(productId) || nameOf() !== "") return;
       namedRef.current.add(productId);
 
       let touched = false;
       const unsubscribe = store.subscribe((s, prev) => {
         if (s.products !== prev.products && nameOf(s)) touched = true;
       });
-      suggestProductName(dataUrl)
-        .then((name) => {
+      fetch("/api/product-name", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+        signal: AbortSignal.timeout(20_000),
+      })
+        .then((res) => res.json() as Promise<NameSuggestion>)
+        .then(({ name, dailyLimit }) => {
+          if (dailyLimit && !dailyLimitRef.current) {
+            dailyLimitRef.current = true;
+            const hours = dailyLimit.resetsInSeconds ? Math.max(1, Math.round(dailyLimit.resetsInSeconds / 3600)) : null;
+            toast("Daily limit reached for name suggestions", {
+              description: `Name products yourself for now${hours ? ` — suggestions resume in about ${plural(hours, "hour")}` : ""}.`,
+            });
+          }
           if (name && !touched && nameOf() === "") store.getState().updateProduct(productId, { name });
         })
         .catch(() => {})

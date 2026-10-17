@@ -1,7 +1,7 @@
 import "server-only";
 
+import { cacheLife } from "next/cache";
 import { redirect } from "next/navigation";
-import { cache } from "react";
 
 import { isAuthEnabled } from "@/lib/auth-config";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
@@ -28,9 +28,16 @@ const DEMO_USER: CurrentUser = {
  * Data Access Layer entry point: returns the signed-in user or redirects to /login
  * (or a stand-in user when auth is disabled — see auth-config.ts).
  * Reads cookies, so call it from a component inside a <Suspense> boundary
- * (required with `cacheComponents`). Deduplicated per request via React `cache`.
+ * (required with `cacheComponents`).
+ *
+ * A private cache scope: `getClaims()` checks the token's expiry against the
+ * current time, which would otherwise block prerendering. Calls within a
+ * request share one result, kept in the viewer's browser, never on the server.
  */
-export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
+export async function getCurrentUser(): Promise<CurrentUser> {
+  "use cache: private";
+  cacheLife({ stale: 60 });
+
   if (!isAuthEnabled) return DEMO_USER;
 
   const supabase = await createClient();
@@ -51,4 +58,4 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser> => {
     avatarUrl: (metadata.avatar_url as string | undefined) ?? null,
     isDemo: false,
   };
-});
+}
