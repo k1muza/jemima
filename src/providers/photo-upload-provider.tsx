@@ -31,7 +31,12 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
 
   const addFiles = useCallback(
     async (target: UploadTarget, list: FileList | File[] | null) => {
-      const files = Array.from(list ?? []).filter((f) => f.type.startsWith("image/"));
+      const images = Array.from(list ?? []).filter((f) => f.type.startsWith("image/"));
+      const { maxPhotoMb } = store.getState().settings;
+      const files = images.filter((f) => f.size <= maxPhotoMb * 1024 * 1024);
+      if (files.length < images.length) {
+        toast.error(`Skipped ${plural(images.length - files.length, "photo")} over ${maxPhotoMb} MB.`);
+      }
       if (!files.length) return;
 
       const { createProduct, addPhoto, setBusy } = store.getState();

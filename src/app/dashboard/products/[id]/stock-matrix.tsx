@@ -117,15 +117,15 @@ export function StockMatrix({ product }: { product: Product }) {
                   {product.sizes.map((size) => {
                     const level = cellLevel(qtyOf(v, size), threshold);
                     return (
-                      <QtyInput
-                        key={size}
-                        role="cell"
-                        value={v.qty[size] ?? null}
-                        onValue={(qty) => setQty(product.id, v.id, size, qty)}
-                        aria-label={`${v.colourName || "Colour"} size ${size}, ${cellLevelLabel[level]}`}
-                        title={cellLevelLabel[level]}
-                        className={cellLevelClasses[level]}
-                      />
+                      <span key={size} role="cell">
+                        <QtyInput
+                          value={v.qty[size] ?? null}
+                          onValue={(qty) => setQty(product.id, v.id, size, qty)}
+                          aria-label={`${v.colourName || "Colour"} size ${size}, ${cellLevelLabel[level]}`}
+                          title={cellLevelLabel[level]}
+                          className={cellLevelClasses[level]}
+                        />
+                      </span>
                     );
                   })}
                   <span role="cell" className="text-right text-[15px] font-semibold tabular-nums">

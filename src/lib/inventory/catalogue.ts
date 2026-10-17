@@ -1,6 +1,6 @@
-import type { CatalogueFilter } from "@/stores/inventory-store";
+import type { CatalogueFilter, CatalogueSort } from "@/stores/inventory-store";
 
-import { productIssues, productStatus } from "./stock";
+import { productIssues, productStatus, productUnits } from "./stock";
 import type { Product } from "./types";
 
 export const FILTERS: CatalogueFilter[] = ["All", "Clothing", "Shoes", "Low stock", "Needs details"];
@@ -31,6 +31,28 @@ export function matchesSearch(product: Product, search: string) {
 
 export function filterCatalogue(products: Product[], filter: CatalogueFilter, search: string, threshold: number) {
   return products.filter((p) => matchesFilter(p, filter, threshold) && matchesSearch(p, search));
+}
+
+export const SORTS: CatalogueSort[] = ["Newest", "Name", "Most units", "Cost", "Retail price", "Last updated"];
+
+/** Spec sorts. "Newest" keeps creation order (new products are added first). */
+export function sortCatalogue(products: Product[], sort: CatalogueSort) {
+  const list = products.slice();
+  switch (sort) {
+    case "Name":
+      // Unnamed products sort last.
+      return list.sort((a, b) => (!a.name ? 1 : 0) - (!b.name ? 1 : 0) || a.name.localeCompare(b.name));
+    case "Most units":
+      return list.sort((a, b) => productUnits(b) - productUnits(a));
+    case "Cost":
+      return list.sort((a, b) => b.costCents - a.costCents);
+    case "Retail price":
+      return list.sort((a, b) => b.priceCents - a.priceCents);
+    case "Last updated":
+      return list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    default:
+      return list;
+  }
 }
 
 /** Unique colours of a product, for swatch dots. */

@@ -32,3 +32,13 @@ export function centsToDollars(cents: number) {
   if (!cents) return "";
   return cents % 100 === 0 ? String(cents / 100) : (cents / 100).toFixed(2);
 }
+
+const dateTimeFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+const dateFormat = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+/** "17 Oct, 14:05" */
+export const formatDateTime = (iso: string) => dateTimeFormat.format(new Date(iso));
+/** "17 Oct 2026" */
+export const formatDate = (iso: string) => dateFormat.format(new Date(iso));
+
+export const formatDelta = (delta: number) => (delta > 0 ? `+${delta}` : String(delta));

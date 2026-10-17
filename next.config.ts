@@ -1,8 +1,12 @@
 import type { NextConfig } from "next";
 
 // A production deploy without Supabase keys would silently fall back to demo
-// mode (no sign-in), so refuse to build it. Previews and local builds may still run in demo mode.
-if (process.env.VERCEL_ENV === "production") {
+// mode (no sign-in), so refuse to build it unless auth was switched off on purpose.
+// Previews and local builds may still run in demo mode.
+const authDisabled = process.env.AUTH_ENABLED?.trim().toLowerCase() === "false";
+if (process.env.VERCEL_ENV === "production" && authDisabled) {
+  console.warn("⚠ AUTH_ENABLED=false: this production deployment is open to anyone with the URL.");
+} else if (process.env.VERCEL_ENV === "production") {
   const missing = ["NEXT_PUBLIC_SUPABASE_URL", "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"].filter(
     (name) => !process.env[name],
   );

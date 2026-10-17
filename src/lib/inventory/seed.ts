@@ -1,4 +1,11 @@
-import { SIZE_TEMPLATES, type Category, type Product } from "./types";
+import {
+  SIZE_TEMPLATES,
+  type Category,
+  type MovementReason,
+  type Product,
+  type ShopSettings,
+  type StockMovement,
+} from "./types";
 
 type SeedRow = [
   name: string,
@@ -80,4 +87,74 @@ export function seedProducts(): Product[] {
       updatedAt: SEED_DATE,
     };
   });
+}
+
+const STAFF_NAMES = ["Jemima", "Amara Okafor", "Theo Lin"];
+
+/**
+ * A fortnight of hard-coded stock history, consistent with the seed quantities:
+ * each movement ends at the size's current quantity.
+ */
+export function seedMovements(products: Product[]): StockMovement[] {
+  const random = rng(29);
+  const reasons: MovementReason[] = ["restock", "restock", "correction", "damage", "restock", "other"];
+  const notes: Record<MovementReason, string[]> = {
+    restock: ["Delivery from supplier", "Back from window display", ""],
+    correction: ["Stock count", "Miscounted on intake"],
+    damage: ["Pulled seam", "Water damage in stock room"],
+    initial_stock: [""],
+    other: ["Moved to alterations", ""],
+  };
+  const movements: StockMovement[] = [];
+  products.forEach((product, i) => {
+    product.variants.slice(0, 2).forEach((variant, j) => {
+      const size = product.sizes[Math.floor(random() * product.sizes.length)];
+      const after = variant.qty[size] ?? 0;
+      let reason = reasons[(i + j) % reasons.length];
+      let delta = 1 + Math.floor(random() * 6);
+      if (reason === "damage" || reason === "other") delta = -Math.min(2, delta);
+      if (reason === "correction") delta = random() < 0.5 ? -1 : 2;
+      if (after - delta < 0) {
+        reason = "restock";
+        delta = after;
+      }
+      if (!delta) return;
+      const day = 2 + ((i * 3 + j * 5) % 15);
+      const hour = 9 + ((i + j * 2) % 8);
+      movements.push({
+        id: `m-seed-${i}-${j}`,
+        productId: product.id,
+        variantId: variant.id,
+        size,
+        delta,
+        before: after - delta,
+        after,
+        reason,
+        note: notes[reason][(i + j) % notes[reason].length],
+        actor: STAFF_NAMES[(i + j) % STAFF_NAMES.length],
+        at: `2026-10-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${String((i * 7) % 60).padStart(2, "0")}:00.000Z`,
+      });
+    });
+  });
+  return movements.sort((a, b) => b.at.localeCompare(a.at));
+}
+
+export function seedSettings(): ShopSettings {
+  return {
+    shopName: "Jemima's Designs",
+    sizeTemplates: { Clothing: SIZE_TEMPLATES.Clothing.slice(), Shoes: SIZE_TEMPLATES.Shoes.slice() },
+    productTypes: {
+      Clothing: ["Dresses", "Tops", "Shirts", "Knitwear", "Trousers", "Skirts", "Denim", "Outerwear"],
+      Shoes: ["Heels", "Sneakers", "Boots", "Formal", "Sandals", "Sport"],
+    },
+    autoDetectColours: true,
+    requireNoteForCorrections: false,
+    maxPhotoMb: 15,
+    staff: [
+      { id: "staff-1", name: "Jemima", email: "jemima@jemimasdesigns.com", role: "Owner", canViewCosts: true, canEditPrices: true, status: "active" },
+      { id: "staff-2", name: "Amara Okafor", email: "amara@jemimasdesigns.com", role: "Staff", canViewCosts: true, canEditPrices: false, status: "active" },
+      { id: "staff-3", name: "Theo Lin", email: "theo@jemimasdesigns.com", role: "Staff", canViewCosts: false, canEditPrices: false, status: "active" },
+      { id: "staff-4", name: "Priya Shah", email: "priya@jemimasdesigns.com", role: "Staff", canViewCosts: false, canEditPrices: false, status: "invited" },
+    ],
+  };
 }

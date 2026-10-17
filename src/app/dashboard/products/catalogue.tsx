@@ -17,7 +17,7 @@ import {
   Swatch,
 } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
-import { colourDots, coverOf, FILTERS, filterCatalogue, matchesFilter } from "@/lib/inventory/catalogue";
+import { colourDots, coverOf, FILTERS, filterCatalogue, matchesFilter, sortCatalogue, SORTS } from "@/lib/inventory/catalogue";
 import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
 import { margin, productStatus, productUnits, sumOf } from "@/lib/inventory/stock";
 import type { Product } from "@/lib/inventory/types";
@@ -35,14 +35,15 @@ function CatalogueContent() {
   const router = useRouter();
   const products = useInventory((s) => s.products);
   const threshold = useInventory((s) => s.threshold);
-  const { filter, search, layout, setFilter, setSearch, setLayout, createProduct, pruneEmptyProducts } = useInventory((s) => s);
+  const { filter, search, layout, sort, setFilter, setSearch, setLayout, setSort, createProduct, pruneEmptyProducts } =
+    useInventory((s) => s);
   const { pick, dragging } = usePhotoUpload();
   const dropNew = useDropTarget("new");
 
   // Products abandoned before anything was entered are discarded on return.
   useEffect(() => pruneEmptyProducts(), [pruneEmptyProducts]);
 
-  const list = filterCatalogue(products, filter, search, threshold);
+  const list = sortCatalogue(filterCatalogue(products, filter, search, threshold), sort);
   const totalUnits = sumOf(products.map(productUnits));
 
   return (
@@ -85,9 +86,22 @@ function CatalogueContent() {
             count: products.filter((p) => matchesFilter(p, f, threshold)).length,
           }))}
         />
+        <label className="ml-auto flex items-center gap-2 text-xs text-muted-foreground">
+          Sort
+          <select
+            value={sort}
+            onChange={(e) => setSort(e.target.value as typeof sort)}
+            className="h-10 rounded-[9px] border bg-card px-3 text-sm text-foreground focus:border-foreground focus:outline-none"
+          >
+            {SORTS.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
         <Segmented
           label="Layout"
-          className="ml-auto"
           value={layout}
           onChange={setLayout}
           options={[

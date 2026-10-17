@@ -9,4 +9,7 @@ export type NavItem = {
 export const dashboardNav: NavItem[] = [
   { title: "Overview", href: "/dashboard" },
   { title: "Products", href: "/dashboard/products", showCount: true },
+  { title: "Inventory", href: "/dashboard/inventory" },
+  { title: "Insights", href: "/dashboard/insights" },
+  { title: "Settings", href: "/dashboard/settings" },
 ];

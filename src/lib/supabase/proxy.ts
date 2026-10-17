@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { isAuthEnabled } from "@/lib/auth-config";
 import type { Database } from "@/types/database";
 
 /** Routes that don't require a signed-in user. */
@@ -18,8 +18,14 @@ function isPublic(pathname: string) {
  * Called from `src/proxy.ts` on every matched request.
  */
 export async function updateSession(request: NextRequest) {
-  // Demo mode: nothing to authenticate against yet.
-  if (!isSupabaseConfigured) return NextResponse.next({ request });
+  // Auth off (AUTH_ENABLED=false, or demo mode): open access, and skip the sign-in pages.
+  if (!isAuthEnabled) {
+    const { pathname } = request.nextUrl;
+    if (pathname === "/login" || pathname === "/signup") {
+      return NextResponse.redirect(new URL("/dashboard", request.url));
+    }
+    return NextResponse.next({ request });
+  }
 
   let response = NextResponse.next({ request });
 

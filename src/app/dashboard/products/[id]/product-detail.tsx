@@ -9,7 +9,7 @@ import { ConfirmDialog } from "@/components/inventory/confirm-dialog";
 import { MoneyInput } from "@/components/inventory/inputs";
 import { buttonStyles, Segmented } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
-import { filterCatalogue } from "@/lib/inventory/catalogue";
+import { filterCatalogue, sortCatalogue } from "@/lib/inventory/catalogue";
 import { formatMoney, formatPercent } from "@/lib/inventory/format";
 import { margin } from "@/lib/inventory/stock";
 import { CATEGORIES, type Product } from "@/lib/inventory/types";
@@ -18,6 +18,7 @@ import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-
 import { useDropTarget } from "@/providers/photo-upload-provider";
 
 import { PhotosSection } from "./photos-section";
+import { StockHistory } from "./stock-history";
 import { StockMatrix } from "./stock-matrix";
 
 export function ProductDetail({ params }: { params: Promise<{ id: string }> }) {
@@ -47,6 +48,7 @@ function DetailContent({ product }: { product: Product }) {
           </div>
         </div>
         <StockMatrix product={product} />
+        <StockHistory product={product} />
       </div>
     </div>
   );
@@ -55,14 +57,14 @@ function DetailContent({ product }: { product: Product }) {
 function DetailBar({ product }: { product: Product }) {
   const router = useRouter();
   const products = useInventory((s) => s.products);
-  const { filter, search, threshold } = useInventory(
-    useShallow((s) => ({ filter: s.filter, search: s.search, threshold: s.threshold })),
+  const { filter, search, threshold, sort } = useInventory(
+    useShallow((s) => ({ filter: s.filter, search: s.search, threshold: s.threshold, sort: s.sort })),
   );
   const deleteProduct = useInventory((s) => s.deleteProduct);
 
   // Step through the catalogue as it's currently filtered (or everything, if this product is filtered out).
-  const filtered = filterCatalogue(products, filter, search, threshold);
-  const order = (filtered.some((p) => p.id === product.id) ? filtered : products).map((p) => p.id);
+  const filtered = sortCatalogue(filterCatalogue(products, filter, search, threshold), sort);
+  const order = (filtered.some((p) => p.id === product.id) ? filtered : sortCatalogue(products, sort)).map((p) => p.id);
   const index = order.indexOf(product.id);
   const go = (delta: number) => router.push(`/dashboard/products/${order[(index + delta + order.length) % order.length]}`);
 
@@ -115,6 +117,8 @@ const fieldInput =
 
 function DetailsSection({ product }: { product: Product }) {
   const updateProduct = useInventory((s) => s.updateProduct);
+  const typeSuggestions = useInventory((s) => s.settings.productTypes[product.category]);
+  const typeListId = `types-${product.id}`;
   const setCategory = useInventory((s) => s.setCategory);
 
   return (
@@ -145,8 +149,14 @@ function DetailsSection({ product }: { product: Product }) {
             value={product.type}
             onChange={(e) => updateProduct(product.id, { type: e.target.value })}
             placeholder="e.g. Knitwear"
+            list={typeListId}
             className={fieldInput}
           />
+          <datalist id={typeListId}>
+            {typeSuggestions.map((t) => (
+              <option key={t} value={t} />
+            ))}
+          </datalist>
         </label>
         <label className={fieldLabel}>
           SKU

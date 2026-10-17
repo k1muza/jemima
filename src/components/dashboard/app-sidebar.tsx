@@ -18,6 +18,7 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
   const hydrated = useInventoryHydrated();
   const productCount = useInventory((s) => s.products.length);
   const threshold = useInventory((s) => s.threshold);
+  const shopName = useInventory((s) => s.settings.shopName);
   const createProduct = useInventory((s) => s.createProduct);
   const resetDemo = useInventory((s) => s.resetDemo);
   const { pick } = usePhotoUpload();
@@ -28,7 +29,9 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
     <Sidebar collapsible="offcanvas" className="border-none">
       <SidebarHeader className="px-6 pt-7 pb-0">
         <Link href="/dashboard" onClick={close} className="flex flex-col gap-1 text-sidebar-foreground hover:text-sidebar-foreground">
-          <span className="font-serif text-[30px] leading-none tracking-[-0.01em] italic">Jemima&apos;s Designs</span>
+          <span className="font-serif text-[30px] leading-none tracking-[-0.01em] italic">
+            {(hydrated && shopName.trim()) || "Jemima's Designs"}
+          </span>
           <span className="font-mono text-[11px] tracking-[0.08em] text-dim uppercase">Stock room</span>
         </Link>
       </SidebarHeader>

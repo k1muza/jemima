@@ -12,6 +12,10 @@ npm run dev
 
 Open http://localhost:3000. Signed-out visitors are redirected to `/login`.
 
+### Turning sign-in off
+
+Sign-in is required by default. Set `AUTH_ENABLED=false` (in `.env.local`, or in Vercel followed by a redeploy) to open the dashboard to anyone with the URL; `/login` and `/signup` then redirect to the dashboard. Without Supabase keys, sign-in is always off (demo mode).
+
 ### Demo mode
 
 Until real Supabase keys are in `.env.local`, the app runs in **demo mode**: no auth gate, a seeded demo catalogue, and every change saved in the browser (catalogue in localStorage, photos in IndexedDB). "Reset demo data" in the sidebar restores the seed. Setting the keys switches auth back on automatically.
@@ -41,6 +45,7 @@ npm run db:types:local  # regenerates src/types/database.ts from the local schem
 2. Under **Environment Variables**, add for Production and Preview:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `AUTH_ENABLED` — optional; `false` turns sign-in off (the site becomes public)
    - `NEXT_PUBLIC_SITE_URL` — your production URL, e.g. `https://jemimas-designs.vercel.app` (optional fallback; auth emails use the request origin)
 
    Do **not** add `SUPABASE_DB_URL`; it is only for running migrations from your machine.
@@ -69,7 +74,7 @@ src/
   app/
     (auth)/                 # /login, /signup, server actions (login, signup, signOut)
     auth/confirm/route.ts   # email-link + OAuth code exchange
-    dashboard/              # Overview, products/ (catalogue), products/[id] (detail)
+    dashboard/              # Overview, products/ (+ [id] detail), inventory/, insights/, settings/
   components/
     ui/                     # shadcn components (add more: npx shadcn@latest add <name>)
     dashboard/              # app sidebar, user menu
