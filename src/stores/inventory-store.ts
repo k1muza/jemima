@@ -89,6 +89,8 @@ export type InventoryActions = {
   addPhoto: (productId: string, dataUrl: string, hex: string) => void;
   assignPhoto: (productId: string, photoId: string, variantId: string | "own") => void;
   makeCover: (productId: string, photoId: string) => void;
+  /** Swap in rotated image bytes for a photo. */
+  replacePhotoImage: (productId: string, photoId: string, dataUrl: string) => void;
   removePhoto: (productId: string, photoId: string) => void;
   setImages: (images: Record<string, string>) => void;
   setBusy: (delta: number) => void;
@@ -537,6 +539,11 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
             });
             const order = findProduct(productId)?.photos.map((ph) => ph.id) ?? [];
             enqueue(productId, () => sync!.reorderPhotos(order));
+          },
+          replacePhotoImage: (productId, photoId, dataUrl) => {
+            set((s) => ({ images: { ...s.images, [photoId]: dataUrl } }));
+            if (demo) photoDb.put(photoId, dataUrl);
+            enqueue(productId, () => sync!.replacePhotoFile(productId, photoId, dataUrl));
           },
           removePhoto: (productId, photoId) => {
             const product = findProduct(productId);

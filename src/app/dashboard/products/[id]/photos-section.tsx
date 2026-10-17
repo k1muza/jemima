@@ -1,5 +1,7 @@
 "use client";
 
+import { RotateCw } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 
 import { PhotoFill, Swatch } from "@/components/inventory/primitives";
@@ -11,7 +13,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { nameColour } from "@/lib/inventory/colour";
+import { nameColour, rotatePhoto } from "@/lib/inventory/colour";
 import { plural } from "@/lib/inventory/format";
 import type { Photo, Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
@@ -52,7 +54,8 @@ export function PhotosSection({ product }: { product: Product }) {
 
 function PhotoTile({ product, photo, isCover }: { product: Product; photo: Photo; isCover: boolean }) {
   const imageUrl = useInventory((s) => s.images[photo.id]);
-  const { makeCover, removePhoto, assignPhoto, restoreProduct } = useInventory((s) => s);
+  const { makeCover, removePhoto, assignPhoto, restoreProduct, replacePhotoImage } = useInventory((s) => s);
+  const [rotating, setRotating] = useState(false);
   const variant = product.variants.find((v) => v.id === photo.variantId);
   const hex = variant?.colourHex ?? photo.hex;
   const variantLabel = (v: { colourName: string; style: string }) => v.colourName + (v.style ? ` · ${v.style}` : "");
@@ -61,6 +64,18 @@ function PhotoTile({ product, photo, isCover }: { product: Product; photo: Photo
     const snapshot = product;
     removePhoto(product.id, photo.id);
     toast("Photo removed", { action: { label: "Undo", onClick: () => restoreProduct(snapshot) } });
+  };
+
+  const rotate = async () => {
+    if (!imageUrl || rotating) return;
+    setRotating(true);
+    try {
+      replacePhotoImage(product.id, photo.id, await rotatePhoto(imageUrl));
+    } catch {
+      toast.error("Couldn't rotate that photo.");
+    } finally {
+      setRotating(false);
+    }
   };
 
   const chip = "rounded-full bg-card/92 text-[11px] font-medium transition-colors hover:bg-white";
@@ -77,6 +92,18 @@ function PhotoTile({ product, photo, isCover }: { product: Product; photo: Photo
           {!isCover && (
             <button type="button" onClick={() => makeCover(product.id, photo.id)} title="Make cover photo" className={cn(chip, "h-[26px] px-[9px]")}>
               Cover
+            </button>
+          )}
+          {imageUrl && (
+            <button
+              type="button"
+              onClick={rotate}
+              disabled={rotating}
+              title="Rotate photo"
+              aria-label="Rotate photo"
+              className={cn(chip, "flex size-[26px] items-center justify-center disabled:opacity-60")}
+            >
+              <RotateCw className={cn("size-3.5", rotating && "animate-spin")} />
             </button>
           )}
           <button type="button" onClick={remove} title="Remove photo" aria-label="Remove photo" className={cn(chip, "size-[26px] text-[15px] leading-none")}>

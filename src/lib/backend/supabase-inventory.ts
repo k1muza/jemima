@@ -329,6 +329,12 @@ export function createSupabaseInventory(supabase: Client) {
         }),
       );
     },
+    async replacePhotoFile(productId: string, photoId: string, dataUrl: string) {
+      const blob = await (await fetch(dataUrl)).blob();
+      const path = photoPath(productId, photoId);
+      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: true }));
+      check(await supabase.from("product_images").update({ file_size: blob.size }).eq("id", photoId));
+    },
     async assignPhoto(photoId: string, variantId: string) {
       check(await supabase.from("product_images").update({ variant_id: variantId }).eq("id", photoId));
     },

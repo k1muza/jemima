@@ -91,7 +91,7 @@ function dominantColour(img: HTMLImageElement) {
   return best && best.w > 20 ? rgbToHex(best.r / best.w, best.g / best.w, best.b / best.w) : rgbToHex(br, bg, bb);
 }
 
-function loadImage(file: File) {
+function loadImage(file: Blob) {
   return new Promise<HTMLImageElement>((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
@@ -113,6 +113,19 @@ export async function processPhoto(file: File) {
   canvas.height = Math.round(img.height * scale);
   canvas.getContext("2d")!.drawImage(img, 0, 0, canvas.width, canvas.height);
   return { dataUrl: canvas.toDataURL("image/jpeg", 0.85), hex: dominantColour(img) };
+}
+
+/** Rotate a stored photo a quarter turn clockwise; returns the new JPEG data URL. */
+export async function rotatePhoto(src: string) {
+  const img = await loadImage(await (await fetch(src)).blob());
+  const canvas = document.createElement("canvas");
+  canvas.width = img.height;
+  canvas.height = img.width;
+  const ctx = canvas.getContext("2d")!;
+  ctx.translate(canvas.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(img, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.92);
 }
 
 /**
