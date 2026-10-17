@@ -1,26 +1,143 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+@custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-serif);
+  --font-serif: var(--font-instrument-serif);
+  --color-line-soft: var(--line-soft);
+  --color-subtle: var(--subtle);
+  --color-dim: var(--dim);
+  --color-strong-line: var(--strong-line);
+  --color-rose: var(--rose);
+  --color-rose-soft: var(--rose-soft);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-fg: var(--ok-fg);
+  --color-ok-line: var(--ok-line);
+  --color-low-bg: var(--low-bg);
+  --color-low-fg: var(--low-fg);
+  --color-low-line: var(--low-line);
+  --color-out-bg: var(--out-bg);
+  --color-out-fg: var(--out-fg);
+  --color-out-line: var(--out-line);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+/* Jemima's Designs palette — warm ivory, charcoal, blush/rose, muted gold. Light only. */
+:root {
+  --background: #f5f2ec;
+  --foreground: #1a1714;
+  --card: #fffdf9;
+  --card-foreground: #1a1714;
+  --popover: #fffdf9;
+  --popover-foreground: #1a1714;
+  --primary: #1a1714;
+  --primary-foreground: #fffdf9;
+  --secondary: #f2ede4;
+  --secondary-foreground: #1a1714;
+  --muted: #ebe5db;
+  --muted-foreground: #6b645b;
+  --accent: #f2ede4;
+  --accent-foreground: #1a1714;
+  --destructive: oklch(0.5 0.15 25);
+  --border: #e5dfd5;
+  --input: #e5dfd5;
+  --ring: #1a1714;
+  --chart-1: oklch(0.58 0.13 25);
+  --chart-2: #b9afa1;
+  --chart-3: #1a1714;
+  --chart-4: oklch(0.72 0.09 75);
+  --chart-5: #6b645b;
+  --radius: 0.875rem;
+  --sidebar: #1a1714;
+  --sidebar-foreground: #f2ede4;
+  --sidebar-primary: #f2ede4;
+  --sidebar-primary-foreground: #1a1714;
+  --sidebar-accent: #2b2621;
+  --sidebar-accent-foreground: #f2ede4;
+  --sidebar-border: #2b2621;
+  --sidebar-ring: #9a9186;
+
+  /* Design-specific neutrals */
+  --line-soft: #efe9df;
+  --subtle: #8a8278;
+  --dim: #9a9186;
+  --strong-line: #d9d1c4;
+  --rose: oklch(0.58 0.13 25);
+  --rose-soft: oklch(0.96 0.025 25);
+
+  /* Stock states (always paired with a text label or title) */
+  --ok-bg: oklch(0.95 0.03 145);
+  --ok-fg: oklch(0.42 0.08 145);
+  --ok-line: oklch(0.85 0.06 145);
+  --low-bg: oklch(0.95 0.045 75);
+  --low-fg: oklch(0.46 0.1 60);
+  --low-line: oklch(0.85 0.07 75);
+  --out-bg: oklch(0.94 0.035 25);
+  --out-fg: oklch(0.48 0.14 25);
+  --out-line: oklch(0.84 0.07 25);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
   }
 }
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer base {
+  /* Quantity and money inputs: arrow keys still nudge, but no spinner chrome. */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
 }

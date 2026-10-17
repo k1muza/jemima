@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Jemima's Designs
 
-## Getting Started
+Dashboard app built with Next.js 16 (App Router, Cache Components), Tailwind CSS v4, shadcn/ui (Base UI), Supabase (Postgres + Auth) and Zustand.
 
-First, run the development server:
+## Getting started
 
 ```bash
+npm install
+cp .env.example .env.local   # then fill in your Supabase URL + publishable key
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000. Signed-out visitors are redirected to `/login`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Demo mode
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Until real Supabase keys are in `.env.local`, the app runs in **demo mode**: no auth gate, a seeded demo catalogue, and every change saved in the browser (catalogue in localStorage, photos in IndexedDB). "Reset demo data" in the sidebar restores the seed. Setting the keys switches auth back on automatically.
 
-## Learn More
+### Database changes (hosted Supabase)
 
-To learn more about Next.js, take a look at the following resources:
+Put `SUPABASE_DB_URL` (Supabase → Connect → Session pooler) in `.env.local`, then:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run db:push     # apply new files in supabase/migrations
+npm run db:types    # regenerate src/types/database.ts from the live schema
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+New migration: `npx supabase migration new <name>`, write the SQL, then `npm run db:push`.
 
-## Deploy on Vercel
+### Local Supabase (optional, needs Docker)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run db:start        # starts Postgres/Auth locally and prints the URL + publishable key
+npm run db:reset        # applies supabase/migrations
+npm run db:types:local  # regenerates src/types/database.ts from the local schema
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deploying to Vercel
+
+1. Push this repo to GitHub, then in Vercel choose **Add New → Project** and import it. The framework (Next.js), build command and output are detected automatically.
+2. Under **Environment Variables**, add for Production and Preview:
+   - `NEXT_PUBLIC_SUPABASE_URL`
+   - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - `NEXT_PUBLIC_SITE_URL` — your production URL, e.g. `https://jemimas-designs.vercel.app` (optional fallback; auth emails use the request origin)
+
+   Do **not** add `SUPABASE_DB_URL`; it is only for running migrations from your machine.
+3. Deploy. A production build fails fast if the Supabase variables are missing, rather than shipping demo mode.
+4. In Supabase → **Authentication → URL Configuration**:
+   - **Site URL**: your production URL
+   - **Redirect URLs**: `https://<your-domain>/auth/confirm`, plus `https://*-<your-vercel-team>.vercel.app/**` so preview deployments can sign in, and `http://localhost:3000/auth/confirm` for development.
+
+`vercel.json` pins server functions to `cle1` (Cleveland), next to the database in AWS us-east-2. If you move the database, update the region to match.
+
+For a hosted project, set the Auth **Site URL** and add `<site>/auth/confirm` to the redirect URLs.
+
+## Scripts
+
+| Script | Purpose |
+| --- | --- |
+| `dev` / `build` / `start` | Next.js |
+| `lint` / `typecheck` | ESLint / `tsc --noEmit` |
+| `db:start` / `db:stop` / `db:reset` / `db:types` | Supabase CLI |
+
+## Structure
+
+```
+src/
+  proxy.ts                  # (formerly middleware) refreshes the Supabase session, guards routes
+  app/
+    (auth)/                 # /login, /signup, server actions (login, signup, signOut)
+    auth/confirm/route.ts   # email-link + OAuth code exchange
+    dashboard/              # Overview, products/ (catalogue), products/[id] (detail)
+  components/
+    ui/                     # shadcn components (add more: npx shadcn@latest add <name>)
+    dashboard/              # app sidebar, user menu
+    inventory/              # design primitives, money/qty inputs, confirm dialog
+  config/nav.ts             # sidebar navigation items
+  lib/
+    inventory/              # types, seed data, colour detection, stock maths, formatting
+    auth.ts                 # getCurrentUser() — Data Access Layer
+    supabase/               # browser, server and proxy clients
+  providers/                # theme, inventory store, photo upload/drag-and-drop
+  stores/inventory-store.ts # Zustand catalogue store (persisted in demo mode)
+  types/database.ts         # generated Supabase types
+supabase/
+  config.toml
+  migrations/               # profiles table + RLS + sign-up trigger
+```
+
+## Conventions
+
+- **Cache Components is on.** Anything reading cookies/session (`getCurrentUser()`, Supabase server queries) must render inside a `<Suspense>` boundary, otherwise the build fails. Keep layouts static and push session reads down into components.
+- **Auth checks:** `proxy.ts` does the optimistic redirect; still call `getCurrentUser()` in Server Actions and Route Handlers before touching data. RLS is the final line of defence.
+- **State:** the catalogue currently lives in the Zustand inventory store (`useInventory((s) => s.x)`), created per request via a provider, never as a module-level store. Pages render skeletons until `useInventoryHydrated()` is true. When Supabase is wired up, server data moves to Server Components and the store keeps client UI state (filters, layout).
+- **Money** is stored as integer cents (`costCents`, `priceCents`), never floats.
+- **Design tokens** (ivory, charcoal, rose, stock-state colours) live in `src/app/globals.css`; the source design is in `design/`.
+- Next.js docs for this exact version live in `node_modules/next/dist/docs/` (see `AGENTS.md`).
