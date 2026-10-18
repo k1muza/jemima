@@ -105,6 +105,7 @@ export function createServerPhotoRenderer() {
     if (ref.imageUrl) {
       if (!sources.has(ref.imageUrl)) sources.set(ref.imageUrl, downloadImage(ref.imageUrl));
       const source = await sources.get(ref.imageUrl)!;
+      sourceHasAlpha = !!(await sharp(source).metadata()).hasAlpha;
       if (ref.backdrop) {
         layers.push({ input: background(w, h, ref.backdrop, stripe ?? 2), blend: "over" });
       }
