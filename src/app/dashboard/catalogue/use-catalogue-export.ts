@@ -83,7 +83,7 @@ export function useCatalogueExport(catalogue: Catalogue | undefined) {
     try {
       await store.getState().flushPending();
       if (store.getState().hasPending()) throw new Error("Your changes haven't saved yet. Please retry.");
-      const url = `/api/catalogue/pdf?catalogueId=${encodeURIComponent(catalogue.id)}`;
+      const url = new URL(`/api/catalogue/pdf?catalogueId=${encodeURIComponent(catalogue.id)}`, window.location.origin).href;
       if (tab && !tab.closed) {
         tab.location.href = url;
       } else if (!tab) {
