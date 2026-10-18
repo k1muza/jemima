@@ -9,7 +9,8 @@ import { catalogueFooter, catalogueItems, coverPhoto } from "@/lib/catalogue/mod
 import type { Catalogue } from "@/lib/inventory/types";
 import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
-import { useCatalogueExport } from "../use-catalogue-export";
+import { CataloguePreview } from "../../catalogue-preview";
+import { useCatalogueExport } from "../../use-catalogue-export";
 
 /** Full-screen preview of the catalogue as customers see the web page. */
 export function CatalogueWebView({ params }: { params: Promise<{ id: string }> }) {
@@ -39,29 +40,29 @@ function WebView({ catalogue }: { catalogue: Catalogue }) {
   const products = useInventory((s) => s.products);
   const images = useInventory((s) => s.images);
   const shopName = useInventory((s) => s.settings.shopName);
-  const setActiveCatalogue = useInventory((s) => s.setActiveCatalogue);
   const storeName = shopName.trim() || "Jemima's Designs";
   const items = useMemo(() => catalogueItems(catalogue, products, images), [catalogue, products, images]);
-  const { busy, downloadPdf, downloadWeb } = useCatalogueExport(catalogue);
+  const { busy, preview, previewPdf, downloadWeb, closePreview } = useCatalogueExport(catalogue);
   const title = catalogue.title || catalogue.name;
   const cover = coverPhoto(items);
 
-  // "Back to editor" returns to this catalogue.
-  useEffect(() => setActiveCatalogue(catalogue.id), [catalogue.id, setActiveCatalogue]);
+  const editorHref = `/dashboard/catalogue/${catalogue.id}`;
+
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && router.push("/dashboard/catalogue");
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && router.push(editorHref);
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [router]);
+  }, [router, editorHref]);
 
   const pill =
     "h-[38px] whitespace-nowrap rounded-full px-4 text-[13px] font-medium transition-colors disabled:opacity-50";
 
   return (
     <Overlay>
+      <CataloguePreview file={preview} onClose={closePreview} />
       <div className="sticky top-0 z-3 flex items-center justify-between gap-3 bg-primary/88 px-[clamp(16px,3vw,32px)] py-3 text-sidebar-foreground backdrop-blur-[10px]">
         <Link
-          href="/dashboard/catalogue"
+          href={editorHref}
           className="py-2 text-sm font-medium whitespace-nowrap text-sidebar-foreground hover:text-white"
         >
           ← Back to editor
@@ -70,7 +71,7 @@ function WebView({ catalogue }: { catalogue: Catalogue }) {
         <span className="flex gap-2">
           <button
             type="button"
-            onClick={downloadPdf}
+            onClick={previewPdf}
             disabled={!items.length || !!busy}
             className={`${pill} border border-[#4a433b] hover:border-sidebar-foreground`}
           >

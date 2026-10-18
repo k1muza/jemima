@@ -44,22 +44,23 @@ export function AppSidebar({ footer }: { footer: ReactNode }) {
       </SidebarHeader>
 
       <SidebarContent className="gap-[34px] px-4 pt-[34px]">
+        <button
+          type="button"
+          onClick={() => {
+            close();
+            router.push(`/dashboard/products/${createProduct()}`);
+          }}
+          className="flex justify-between rounded-lg bg-sidebar-foreground px-3.5 py-[11px] text-left text-sm font-semibold text-primary transition-colors hover:bg-white"
+        >
+          New product<span aria-hidden>+</span>
+        </button>
+
         {/* usePathname() is request data on dynamic routes, so it streams in behind Suspense. */}
         <Suspense fallback={<NavLinks pathname={null} counts={counts} onNavigate={close} />}>
           <ActiveNavLinks counts={counts} onNavigate={close} />
         </Suspense>
 
         <div className="flex flex-col gap-2.5">
-          <button
-            type="button"
-            onClick={() => {
-              close();
-              router.push(`/dashboard/products/${createProduct()}`);
-            }}
-            className="flex justify-between rounded-lg bg-sidebar-foreground px-3.5 py-[11px] text-left text-sm font-semibold text-primary transition-colors hover:bg-white"
-          >
-            New product<span aria-hidden>+</span>
-          </button>
           <button
             type="button"
             onClick={() => {

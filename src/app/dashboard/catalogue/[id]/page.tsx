@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 
-import { CatalogueWebView } from "./catalogue-web-view";
+import { CatalogueEditor, CatalogueSkeleton } from "../catalogue-editor";
 
 export const metadata: Metadata = { title: "Catalogue" };
 
-export default function CatalogueWebPage({ params }: PageProps<"/dashboard/catalogue/[id]">) {
+export default function CataloguePage({ params }: PageProps<"/dashboard/catalogue/[id]">) {
   return (
-    <Suspense>
-      <CatalogueWebView params={params} />
+    <Suspense fallback={<CatalogueSkeleton />}>
+      <CatalogueEditor params={params} />
     </Suspense>
   );
 }

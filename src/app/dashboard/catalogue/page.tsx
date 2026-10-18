@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
-import { CatalogueEditor } from "./catalogue-editor";
+import { CatalogueList } from "./catalogue-list";
 
-export const metadata: Metadata = { title: "Catalogue" };
+export const metadata: Metadata = { title: "Catalogues" };
 
-export default function CataloguePage() {
-  return <CatalogueEditor />;
+export default function CataloguesPage() {
+  return <CatalogueList />;
 }

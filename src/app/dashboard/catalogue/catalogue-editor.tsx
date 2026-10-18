@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { use, useMemo, useState, type ReactNode } from "react";
 
 import { ConfirmDialog } from "@/components/inventory/confirm-dialog";
 import { buttonStyles, PageHeader, Panel, PhotoFill, Segmented, Swatch } from "@/components/inventory/primitives";
@@ -21,29 +22,19 @@ import type { Catalogue, CataloguePageLayout, Category } from "@/lib/inventory/t
 import { cn } from "@/lib/utils";
 import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
+import { CataloguePreview } from "./catalogue-preview";
 import { useCatalogueExport } from "./use-catalogue-export";
 
 const inputClass =
   "h-10 rounded-[9px] border bg-card px-3 text-[15px] text-foreground focus:border-foreground focus:outline-none";
 
-export function CatalogueEditor() {
+export function CatalogueEditor({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = use(params);
   const hydrated = useInventoryHydrated();
+  const catalogue = useInventory((s) => s.catalogues.find((c) => c.id === id));
+
   if (!hydrated) return <CatalogueSkeleton />;
-  return <EditorContent />;
-}
-
-/** The catalogue open in the editor; creates the first one on a first visit. */
-export function useActiveCatalogue() {
-  const catalogues = useInventory((s) => s.catalogues);
-  const activeId = useInventory((s) => s.activeCatalogueId);
-  const ensureCatalogue = useInventory((s) => s.ensureCatalogue);
-  useEffect(() => ensureCatalogue(), [catalogues.length, ensureCatalogue]);
-  return catalogues.find((c) => c.id === activeId) ?? catalogues[0];
-}
-
-function EditorContent() {
-  const catalogue = useActiveCatalogue();
-  if (!catalogue) return <CatalogueSkeleton />;
+  if (!catalogue) return <NotFound />;
   return <Editor catalogue={catalogue} />;
 }
 
@@ -52,30 +43,30 @@ function Editor({ catalogue }: { catalogue: Catalogue }) {
   const images = useInventory((s) => s.images);
   const items = useMemo(() => catalogueItems(catalogue, products, images), [catalogue, products, images]);
   const pages = pageCount(catalogue, items);
-  const { busy, downloadPdf, downloadWeb } = useCatalogueExport(catalogue);
+  const { busy, preview, previewPdf, previewWeb, closePreview } = useCatalogueExport(catalogue);
   const empty = !items.length;
 
   return (
-    <>
+    <div className="-mt-6 flex flex-col gap-8 md:-mt-10">
+      <CataloguePreview file={preview} onClose={closePreview} />
+      <SaveBar />
       <PageHeader
         eyebrow={`${plural(items.length, "product")} · ${plural(pages, "page")}`}
-        title="Catalogue"
+        title={catalogue.name || "Untitled catalogue"}
         actions={
           <>
-            <button type="button" onClick={downloadPdf} disabled={empty || !!busy} className={buttonStyles.outline}>
-              {busy === "pdf" ? "Making PDF…" : "Download PDF"}
+            <button type="button" onClick={previewPdf} disabled={empty || !!busy} className={buttonStyles.outline}>
+              {busy === "pdf" ? "Making PDF…" : "View PDF"}
             </button>
-            <button type="button" onClick={downloadWeb} disabled={empty || !!busy} className={buttonStyles.outline}>
-              {busy === "web" ? "Making web page…" : "Download web page"}
+            <button type="button" onClick={previewWeb} disabled={empty || !!busy} className={buttonStyles.outline}>
+              {busy === "web" ? "Making web page…" : "View web file"}
             </button>
-            <Link href={`/dashboard/catalogue/${catalogue.id}`} className={buttonStyles.primary}>
+            <Link href={`/dashboard/catalogue/${catalogue.id}/view`} className={buttonStyles.primary}>
               Open web page →
             </Link>
           </>
         }
       />
-
-      <CatalogueTabs activeId={catalogue.id} />
 
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(340px,100%),1fr))] items-start gap-4">
         <div className="flex flex-col gap-4">
@@ -84,53 +75,67 @@ function Editor({ catalogue }: { catalogue: Catalogue }) {
         </div>
         <ProductsPanel catalogue={catalogue} />
       </div>
-    </>
-  );
-}
-
-function CatalogueTabs({ activeId }: { activeId: string }) {
-  const catalogues = useInventory((s) => s.catalogues);
-  const products = useInventory((s) => s.products);
-  const images = useInventory((s) => s.images);
-  const { setActiveCatalogue, createCatalogue } = useInventory((s) => s);
-
-  return (
-    <div role="tablist" aria-label="Catalogues" className="flex gap-2.5 overflow-x-auto pb-1">
-      {catalogues.map((c) => {
-        const on = c.id === activeId;
-        const ids = new Set(selectedIds(c, products));
-        const shown = products.filter((p) => ids.has(p.id) && (!c.hideSoldOut || productUnits(p) > 0));
-        const cover = shown[0] ? coverOf(shown[0], images) : null;
-        return (
-          <button
-            key={c.id}
-            type="button"
-            role="tab"
-            aria-selected={on}
-            onClick={() => setActiveCatalogue(c.id)}
-            className={cn(
-              "flex min-w-[180px] shrink-0 items-center gap-3 rounded-xl border py-2.5 pr-4 pl-2.5 text-left transition-colors",
-              on ? "border-primary bg-primary text-sidebar-foreground" : "bg-card hover:border-foreground",
-            )}
-          >
-            <PhotoFill hex={cover?.hex ?? "#ebe5db"} imageUrl={cover?.imageUrl} className="h-[42px] w-[34px] shrink-0 rounded-[5px]" />
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="max-w-[200px] truncate text-sm font-semibold">{c.name || "Untitled catalogue"}</span>
-              <span className="text-xs opacity-70">{plural(shown.length, "product")}</span>
-            </span>
-          </button>
-        );
-      })}
-      <button
-        type="button"
-        onClick={() => createCatalogue({ name: "New catalogue", title: "New catalogue", subtitle: "", productIds: [] })}
-        className="min-w-[150px] shrink-0 rounded-xl border-[1.5px] border-dashed border-[#cfc6b8] px-4 py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground hover:text-foreground"
-      >
-        + New catalogue
-      </button>
     </div>
   );
 }
+
+function SaveBar() {
+  const router = useRouter();
+  const flushPending = useInventory((s) => s.flushPending);
+  const createCatalogue = useInventory((s) => s.createCatalogue);
+  const [saving, setSaving] = useState(false);
+
+  // Edits already save as you type; these just finish any pending saves, then move on.
+  const save = async (next: "list" | "new") => {
+    setSaving(true);
+    await flushPending();
+    router.push(next === "list" ? "/dashboard/catalogue" : `/dashboard/catalogue/${createCatalogue(NEW_CATALOGUE)}`);
+    setSaving(false);
+  };
+
+  return (
+    <div className="sticky top-14 z-10 flex flex-wrap items-center justify-between gap-3 border-b bg-background/94 py-4 backdrop-blur-sm md:top-0">
+      <Link
+        href="/dashboard/catalogue"
+        className="py-1.5 pr-2.5 text-sm font-medium whitespace-nowrap text-muted-foreground hover:text-foreground"
+      >
+        ← All catalogues
+      </Link>
+      <div className="flex items-center gap-4">
+        <span className="flex items-center gap-[7px] text-[13px] text-muted-foreground">
+          <span className="size-[7px] rounded-full bg-[oklch(0.62_0.12_145)]" />
+          Saved automatically
+        </span>
+        <button type="button" disabled={saving} onClick={() => save("new")} className={cn(buttonStyles.outline, "py-2")}>
+          Save &amp; add new
+        </button>
+        <button type="button" disabled={saving} onClick={() => save("list")} className={cn(buttonStyles.primary, "py-2")}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export const NEW_CATALOGUE: Partial<Catalogue> = {
+  name: "New catalogue",
+  title: "New catalogue",
+  subtitle: "",
+  productIds: [],
+};
+
+function NotFound() {
+  return (
+    <div className="flex flex-col items-start gap-4 py-16">
+      <h1 className="font-serif text-5xl">Catalogue not found</h1>
+      <p className="text-sm text-muted-foreground">It may have been deleted.</p>
+      <Link href="/dashboard/catalogue" className={buttonStyles.outline}>
+        ← All catalogues
+      </Link>
+    </div>
+  );
+}
+
 
 function PanelHeading({ children, aside }: { children: ReactNode; aside?: ReactNode }) {
   return (
@@ -153,17 +158,19 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 const linkButton = "text-xs font-medium text-muted-foreground transition-colors hover:text-foreground";
 
 function DetailsPanel({ catalogue }: { catalogue: Catalogue }) {
+  const router = useRouter();
   const products = useInventory((s) => s.products);
   const canDelete = useInventory((s) => s.catalogues.length > 1);
   const { updateCatalogue, createCatalogue, deleteCatalogue } = useInventory((s) => s);
   const update = (patch: Partial<Catalogue>) => updateCatalogue(catalogue.id, patch);
 
   const duplicate = () => {
-    createCatalogue({
+    const id = createCatalogue({
       ...catalogue,
       name: `${catalogue.name || "Catalogue"} copy`,
       productIds: selectedIds(catalogue, products),
     });
+    router.push(`/dashboard/catalogue/${id}`);
   };
 
   return (
@@ -184,7 +191,10 @@ function DetailsPanel({ catalogue }: { catalogue: Catalogue }) {
                 title={`Delete the ${catalogue.name || "untitled"} catalogue?`}
                 description="Products are not affected."
                 confirmLabel="Delete"
-                onConfirm={() => deleteCatalogue(catalogue.id)}
+                onConfirm={() => {
+                  deleteCatalogue(catalogue.id);
+                  router.push("/dashboard/catalogue");
+                }}
               />
             )}
           </span>
@@ -276,6 +286,8 @@ function ProductsPanel({ catalogue }: { catalogue: Catalogue }) {
   const shown = filterForEditor(catalogue, products);
   const colours = useMemo(() => colourOptions(products), [products]);
   const selectedCount = selected.filter((id) => products.some((p) => p.id === id)).length;
+  // Ticked but not printed: "Leave out sold-out items" drops them from the catalogue.
+  const leftOut = catalogue.hideSoldOut ? products.filter((p) => selectedSet.has(p.id) && productUnits(p) === 0).length : 0;
 
   const toggle = (id: string) =>
     update({ productIds: selectedSet.has(id) ? selected.filter((x) => x !== id) : [...selected, id] });
@@ -292,6 +304,21 @@ function ProductsPanel({ catalogue }: { catalogue: Catalogue }) {
         <PanelHeading aside={<span className="text-xs text-subtle">{formatNumber(selectedCount)} selected</span>}>
           Products
         </PanelHeading>
+        {leftOut > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-[9px] bg-secondary px-3 py-2.5 text-[13px]">
+            <span>
+              {plural(leftOut, "ticked product")} {leftOut === 1 ? "is" : "are"} sold out, so{" "}
+              {leftOut === 1 ? "it's" : "they're"} left out of the catalogue.
+            </span>
+            <button
+              type="button"
+              onClick={() => update({ hideSoldOut: false })}
+              className="font-medium underline underline-offset-[3px]"
+            >
+              Include sold-out items
+            </button>
+          </div>
+        )}
         <Segmented
           label="Department"
           options={DEPARTMENTS}
@@ -368,7 +395,12 @@ function ProductsPanel({ catalogue }: { catalogue: Catalogue }) {
               <span className="flex min-w-0 flex-col gap-0.5">
                 <span className="truncate text-[13px] font-medium">{p.name || "Untitled"}</span>
                 <span className="text-[11px] text-subtle">
-                  {plural(p.variants.length, "colour")} · {units ? `${formatNumber(units)} in stock` : "sold out"}
+                  {plural(p.variants.length, "colour")} ·{" "}
+                  {units
+                    ? `${formatNumber(units)} in stock`
+                    : on && catalogue.hideSoldOut
+                      ? "sold out · not in catalogue"
+                      : "sold out"}
                 </span>
               </span>
               <span className="text-[13px] tabular-nums">{p.priceCents ? formatMoney(p.priceCents) : "No price"}</span>
@@ -381,7 +413,7 @@ function ProductsPanel({ catalogue }: { catalogue: Catalogue }) {
   );
 }
 
-function CatalogueSkeleton() {
+export function CatalogueSkeleton() {
   return (
     <div className="flex flex-col gap-8">
       <Skeleton className="h-24 w-72" />
