@@ -2,7 +2,7 @@ import { PDFString, rgb, setCharacterSpacing, type PDFDocument, type PDFFont, ty
 
 import type { Catalogue } from "@/lib/inventory/types";
 
-import { renderPhoto, type RenderOptions } from "./images";
+import type { RenderOptions } from "./images";
 import type { CatalogueItem, CataloguePage, PhotoRef } from "./model";
 
 /**
@@ -179,7 +179,9 @@ export type PhotoBox = {
 };
 export type PlacedPhoto = PhotoBox & { x: number; top: number };
 
-export function createPhotoEmbedder(doc: PDFDocument) {
+export type PhotoRenderer = (ref: PhotoRef, options: RenderOptions) => Promise<{ bytes: Uint8Array; type: "image/png" | "image/jpeg" }>;
+
+export function createPhotoEmbedder(doc: PDFDocument, renderPhoto: PhotoRenderer) {
   const cache = new Map<string, Promise<PDFImage>>();
   return (box: PhotoBox) => {
     const w = Math.round(box.width * PHOTO_DENSITY);

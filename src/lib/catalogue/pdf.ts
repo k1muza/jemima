@@ -1,9 +1,14 @@
+import "server-only";
+
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+
 import fontkit from "@pdf-lib/fontkit";
 import { PDFDocument, type PDFPage } from "pdf-lib";
 
 import type { Catalogue, CatalogueTheme } from "@/lib/inventory/types";
 
-import { releasePhotos } from "./images";
+import { createServerPhotoRenderer } from "./server-images";
 import { catalogueFooter, cataloguePages, coverPhoto, type CatalogueItem } from "./model";
 import {
   ascent,
@@ -38,20 +43,19 @@ import { atelier, boutique, lookbook } from "./pdf-themes";
 /**
  * Builds the printable catalogue as an A4 PDF with pdf-lib, following the
  * design's print pages (794×1123 px, so every design px is 0.75 pt).
- * Browser-only: photos are cropped on a canvas before they're embedded.
+ * Node-side: fonts are loaded from disk and photos are prepared with Sharp.
  */
 
-let fontBytes: Promise<Record<FontName, ArrayBuffer>> | null = null;
+let fontBytes: Promise<Record<FontName, Uint8Array>> | null = null;
 
 function loadFontBytes() {
   fontBytes ??= Promise.all(
     (Object.keys(FONT_FILES) as FontName[]).map(async (name) => {
-      const response = await fetch(`/fonts/catalogue/${FONT_FILES[name]}`);
-      if (!response.ok) throw new Error("Couldn't load the catalogue fonts. Check your connection and try again.");
-      return [name, await response.arrayBuffer()] as const;
+      const bytes = await readFile(path.join(process.cwd(), "public", "fonts", "catalogue", FONT_FILES[name]));
+      return [name, bytes] as const;
     }),
   )
-    .then((entries) => Object.fromEntries(entries) as Record<FontName, ArrayBuffer>)
+    .then((entries) => Object.fromEntries(entries) as unknown as Record<FontName, Uint8Array>)
     .catch((error) => {
       fontBytes = null; // retry next time
       throw error;
@@ -294,7 +298,7 @@ export async function buildCataloguePdf({ catalogue, items, storeName, onProgres
   const ctx: Context = {
     doc,
     fonts,
-    photo: createPhotoEmbedder(doc),
+    photo: createPhotoEmbedder(doc, createServerPhotoRenderer()),
     storeName,
     catalogue,
     footer: catalogueFooter(catalogue, storeName),
@@ -307,18 +311,14 @@ export async function buildCataloguePdf({ catalogue, items, storeName, onProgres
   let done = 0;
   const tick = () => onProgress?.(++done, total);
 
-  try {
-    if (catalogue.cover) {
-      await design.cover(ctx);
-      tick();
-    }
-    for (const page of pages) {
-      if (page.kind === "grid") await design.grid(ctx, page);
-      else await design.feature(ctx, page);
-      tick();
-    }
-    return await doc.save();
-  } finally {
-    releasePhotos();
+  if (catalogue.cover) {
+    await design.cover(ctx);
+    tick();
   }
+  for (const page of pages) {
+    if (page.kind === "grid") await design.grid(ctx, page);
+    else await design.feature(ctx, page);
+    tick();
+  }
+  return await doc.save();
 }
