@@ -54,10 +54,21 @@ function shading(width: number, height: number, stops: NonNullable<RenderOptions
 function trustedStorageUrl(value: string) {
   try {
     const url = new URL(value);
+    if (url.protocol !== "https:" || url.username || url.password || url.port) return false;
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    if (!supabaseUrl) return false;
-    const allowed = new URL(supabaseUrl);
-    return url.protocol === "https:" && url.origin === allowed.origin && url.pathname.startsWith("/storage/v1/object/");
+    if (supabaseUrl) {
+      const allowed = new URL(supabaseUrl);
+      if (url.origin === allowed.origin && url.pathname.startsWith("/storage/v1/object/")) return true;
+    }
+
+    // Accepted AI ironing results are stored in this Cloudinary folder, not Supabase.
+    // Keep the allowed CDN host and path tightly scoped to prevent arbitrary SSRF.
+    const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+    if (!cloudName || !/^[a-z0-9_-]+$/i.test(cloudName) || url.hostname !== "res.cloudinary.com") return false;
+    const prefix = `/${cloudName}/image/upload/`;
+    if (!url.pathname.startsWith(prefix)) return false;
+    const asset = url.pathname.slice(prefix.length).replace(/^v[0-9]+\//, "");
+    return /^jemimas-designs\/products\/ironed-[a-f0-9]{32}(?:\.(?:png|jpg|jpeg|webp))?$/i.test(asset);
   } catch {
     return false;
   }
