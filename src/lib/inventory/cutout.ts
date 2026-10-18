@@ -15,6 +15,7 @@ import type { Photo } from "./types";
 export const cutoutKey = (photoId: string) => `${photoId}:cutout`;
 export const refinedKey = (photoId: string) => `${photoId}:refined`;
 export const maskKey = (photoId: string) => `${photoId}:mask`;
+export const ironedKey = (photoId: string) => `${photoId}:ironed`;
 
 /** The displayable versions of a photo, each of which may also be shown enhanced. */
 export type PhotoVersion = "original" | "cutout" | "refined";
@@ -25,6 +26,7 @@ export const enhancedKey = (photoId: string, version: PhotoVersion) => `${versio
 /** Every file a photo may have. */
 export const photoKeys = (photoId: string) => [
   photoId,
+  ironedKey(photoId),
   cutoutKey(photoId),
   refinedKey(photoId),
   maskKey(photoId),
@@ -51,9 +53,10 @@ export function currentVersion(
  */
 export function photoSrc(
   images: Record<string, string>,
-  photo: Pick<Photo, "id" | "showCutout" | "refined" | "enhanced">,
+  photo: Pick<Photo, "id" | "showCutout" | "refined" | "enhanced" | "showIroned">,
   enhanced = photo.enhanced,
 ): string | undefined {
+  if (photo.showIroned && images[ironedKey(photo.id)]) return images[ironedKey(photo.id)];
   const version = currentVersion(images, photo);
   return (enhanced && images[enhancedKey(photo.id, version)]) || images[versionKey(photo.id, version)];
 }
@@ -110,3 +113,7 @@ export const requestCutout = (image: string, options?: RequestOptions) =>
 /** Enhance a photo (`e_improve`); a PNG comes back as PNG, a photo as JPEG. */
 export const requestEnhanced = (image: string, options?: RequestOptions) =>
   requestProcessed("/api/enhance", image, "Couldn't enhance the photo.", options);
+
+/** Request exactly one AI edit. The result is only a preview until the caller accepts it. */
+export const requestIroned = (image: string, options?: RequestOptions) =>
+  requestProcessed("/api/iron-clothes", image, "Couldn't iron the clothes.", options);

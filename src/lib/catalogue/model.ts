@@ -1,3 +1,4 @@
+import { luminance } from "@/lib/inventory/colour";
 import { photoSrc } from "@/lib/inventory/cutout";
 import { formatMoney } from "@/lib/inventory/format";
 import { productUnits, variantUnits } from "@/lib/inventory/stock";
@@ -70,9 +71,36 @@ export const CATALOGUE_THEMES: {
 
 export const themeInfo = (theme: CatalogueTheme) => CATALOGUE_THEMES.find((t) => t.value === theme) ?? CATALOGUE_THEMES[0];
 const PLACEHOLDER_HEX = "#d9d1c4";
-/** Every other product's photos sit on black; the rest stay transparent. */
-export const PHOTO_BACKDROP = "#000000";
-export const backdropFor = (index: number) => (index % 2 === 0 ? PHOTO_BACKDROP : undefined);
+/**
+ * Tones that background-removed photos sit on: oatmeal, ecru, charcoal, mist,
+ * olive, slate. Without a garment to contrast with they're used in this order.
+ */
+export const PHOTO_BACKDROPS = ["#d9ccb6", "#ece4d4", "#1f1e1d", "#f2f1ee", "#5d5f41", "#5b636f"];
+/** The luminance gap between garment and backdrop that reads as clear contrast. */
+const STRONG_CONTRAST = 0.35;
+
+/**
+ * Picks backdrops product by product: dark tones behind light pieces, light
+ * tones behind dark ones (`garment` is luminance, 0–1). Each group of
+ * suitable tones takes turns, so neighbouring products of a kind differ.
+ */
+export function backdropPicker() {
+  const turns = new Map<string, number>();
+  const next = (tones: string[]) => {
+    const key = tones.join();
+    const turn = turns.get(key) ?? 0;
+    turns.set(key, turn + 1);
+    return tones[turn % tones.length];
+  };
+  return (garment?: number) => {
+    if (garment === undefined) return next(PHOTO_BACKDROPS);
+    const gap = (tone: string) => Math.abs(luminance(tone) - garment);
+    const suitable = PHOTO_BACKDROPS.filter((tone) => gap(tone) >= STRONG_CONTRAST);
+    // A mid-tone garment may have no strongly contrasting tone: use the furthest.
+    if (!suitable.length) return PHOTO_BACKDROPS.reduce((best, tone) => (gap(tone) > gap(best) ? tone : best));
+    return next(suitable);
+  };
+}
 /** Cover background when the catalogue has no products. */
 export const EMPTY_COVER_HEX = "#2b2621";
 
@@ -154,12 +182,26 @@ function photoRef(product: Product, index: number, images: Record<string, string
 const whatsappLink = (product: Product) => normalizeWhatsappCatalogUrl(product.whatsappCatalogUrl ?? "") || undefined;
 
 /** The products a catalogue prints, in product-list order. */
-export function catalogueItems(catalogue: Catalogue, products: Product[], images: Record<string, string>): CatalogueItem[] {
+/**
+ * `tones` holds the measured garment luminance of cutout photos by URL (see
+ * `photoLuminances`); until a photo is measured its variant colour stands in.
+ */
+export function catalogueItems(
+  catalogue: Catalogue,
+  products: Product[],
+  images: Record<string, string>,
+  tones: Record<string, number> = {},
+): CatalogueItem[] {
   const ids = new Set(selectedIds(catalogue, products));
+  const backdropFor = backdropPicker();
   return products
     .filter((p) => ids.has(p.id) && (!catalogue.hideSoldOut || productUnits(p) > 0))
-    .map((p, index) => {
-      const backdrop = backdropFor(index);
+    .map((p) => {
+      // One tone per product, chosen to contrast with the garment in its cover photo.
+      const cover = photoRef(p, 0, images);
+      const hex = cover?.hex ?? p.variants[0]?.colourHex;
+      const measured = cover?.imageUrl ? tones[cover.imageUrl] : undefined;
+      const backdrop = backdropFor(measured ?? (hex ? luminance(hex) : undefined));
       const variants = catalogue.hideSoldOut ? p.variants.filter((v) => variantUnits(p, v) > 0) : p.variants;
       const seen = new Set<string>();
       const colours = variants
@@ -181,6 +223,9 @@ export function catalogueItems(catalogue: Catalogue, products: Product[], images
       };
     });
 }
+
+/** The cover photos' URLs, whose garments backdrops are chosen to contrast with. */
+export const coverUrls = (items: CatalogueItem[]) => items.flatMap((item) => (item.cover.imageUrl ? [item.cover.imageUrl] : []));
 
 /** Content pages (after the optional cover). Page numbers count the cover. */
 export function cataloguePages(catalogue: Catalogue, items: CatalogueItem[]): CataloguePage[] {

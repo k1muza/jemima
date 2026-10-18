@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { downloadBlob } from "@/lib/catalogue/images";
-import { catalogueFileName, catalogueItems } from "@/lib/catalogue/model";
+import { catalogueFileName, catalogueItems, coverUrls } from "@/lib/catalogue/model";
+import { photoLuminances } from "@/lib/catalogue/photo-tone";
 import type { Catalogue } from "@/lib/inventory/types";
 import { useInventoryApi } from "@/providers/inventory-store-provider";
 
@@ -29,8 +30,8 @@ export function useCatalogueExport(catalogue: Catalogue | undefined) {
     if (!catalogue || busy) return null;
     const { products, images, settings } = store.getState();
     const storeName = settings.shopName.trim() || "Jemima's Designs";
-    const items = catalogueItems(catalogue, products, images);
-    if (!items.length) {
+    const unmeasured = catalogueItems(catalogue, products, images);
+    if (!unmeasured.length) {
       toast.error("Add at least one product to the catalogue first.");
       return null;
     }
@@ -38,6 +39,9 @@ export function useCatalogueExport(catalogue: Catalogue | undefined) {
     setBusy(kind);
     const toastId = toast.loading(kind === "pdf" ? "Making the PDF…" : "Making the web page…");
     try {
+      // Backdrops contrast with each cutout's garment, measured from the photo.
+      const tones = await photoLuminances(coverUrls(unmeasured));
+      const items = catalogueItems(catalogue, products, images, tones);
       let file: Omit<CataloguePreviewFile, "url">;
       if (kind === "pdf") {
         const { buildCataloguePdf } = await import("@/lib/catalogue/pdf");

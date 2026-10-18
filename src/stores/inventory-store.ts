@@ -8,11 +8,13 @@ import {
   currentVersion,
   cutoutKey,
   enhancedKey,
+  ironedKey,
   maskKey,
   photoKeys,
   refinedKey,
   requestCutout,
   requestEnhanced,
+  requestIroned,
   versionKey,
   type PhotoVersion,
 } from "@/lib/inventory/cutout";
@@ -42,6 +44,7 @@ export type CatalogueSort = "Newest" | "Name" | "Most units" | "Cost" | "Retail 
 
 export type AdjustResult = { ok: true; movement: StockMovement } | { ok: false; error: string };
 export type CutoutResult = { ok: true } | { ok: false; error: string };
+export type IronResult = { ok: true; image: string } | { ok: false; error: string };
 /** A hand refinement of a cutout, as PNG data URLs. */
 export type Refinement = { refined: string; mask: string };
 /** New bytes for a photo's other versions (e.g. after rotating it). */
@@ -80,6 +83,8 @@ export type InventoryState = {
   cutoutPending: Record<string, true>;
   /** Photo ids being enhanced. */
   enhancePending: Record<string, true>;
+  /** Photo ids currently being sent to the manually triggered Gemini edit. */
+  ironPending: Record<string, true>;
   /** Customer-facing catalogues (PDF / web page), oldest first. */
   catalogues: Catalogue[];
   /** The catalogue open in the editor (falls back to the first). */
@@ -144,6 +149,12 @@ export type InventoryActions = {
   enhance: (productId: string, photoId: string) => Promise<CutoutResult>;
   /** Save whether the photo shows its enhanced copy (instant: no Cloudinary call). */
   setEnhanced: (productId: string, photoId: string, enhanced: boolean) => void;
+  /** Generate or reuse an ironed preview without changing the active photo. */
+  ironClothes: (productId: string, photoId: string) => Promise<IronResult>;
+  /** Persist a preview, then make it active. A failed save leaves the previous image untouched. */
+  acceptIroned: (productId: string, photoId: string, image: string) => Promise<CutoutResult>;
+  /** Switch between the saved ironed result and the prior version without regenerating. */
+  setIroned: (productId: string, photoId: string, shown: boolean) => void;
   /**
    * Store a hand refinement of a photo's cutout, or `null` to drop it (back to the
    * plain cutout). The cutout and original are never changed. Resolves once saved;
@@ -244,6 +255,8 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
         const cutoutRequests = new Map<string, Promise<CutoutResult>>();
         /** Enhancements in flight, by the file they produce. */
         const enhanceRequests = new Map<string, Promise<CutoutResult>>();
+        /** AI ironing in flight, keyed by photo, so repeated clicks never create paid duplicates. */
+        const ironRequests = new Map<string, Promise<IronResult>>();
         /** Storing a photo's enhanced copies (and their files' keys in `images`). */
         const keepEnhanced = (productId: string, photoId: string, files: Partial<Record<PhotoVersion, string>>) => {
           const entries = (Object.entries(files) as [PhotoVersion, string | undefined][]).filter((e): e is [PhotoVersion, string] => !!e[1]);
@@ -279,9 +292,9 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           next.finally(() => chains.get(queue) === next && chains.delete(queue));
         };
         /** Like `enqueue`, but returns the save so the caller can handle a failure itself (no reload). */
-        const enqueueAwait = (queue: string, task: () => Promise<void>) => {
+        const enqueueAwait = <T,>(queue: string, task: () => Promise<T>) => {
           const result = (chains.get(queue) ?? Promise.resolve()).then(task);
-          const next = result.catch(() => {});
+          const next = result.then(() => {}, () => {});
           chains.set(queue, next);
           next.finally(() => chains.get(queue) === next && chains.delete(queue));
           return result;
@@ -350,6 +363,7 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           busy: 0,
           cutoutPending: {},
           enhancePending: {},
+          ironPending: {},
           catalogues: [],
           activeCatalogueId: null,
 
@@ -764,6 +778,68 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
             if (!photo || !!photo.enhanced === enhanced) return;
             editPhoto(productId, photoId, (ph) => ({ ...ph, enhanced }));
             enqueue(productId, () => sync!.setEnhancedShown(photoId, enhanced));
+          },
+          ironClothes: (productId, photoId) => {
+            const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);
+            const original = get().images[photoId];
+            if (!photo || !original) return Promise.resolve({ ok: false, error: "That photo is no longer here." });
+            const saved = get().images[ironedKey(photoId)];
+            if (photo.hasIroned && saved) return Promise.resolve({ ok: true, image: saved });
+            const inFlight = ironRequests.get(photoId);
+            if (inFlight) return inFlight;
+
+            const run = async (): Promise<IronResult> => {
+              set((s) => ({ ironPending: { ...s.ironPending, [photoId]: true } }));
+              try {
+                // Always edit the untouched opaque upload. Existing cutouts, masks and enhancements remain valid history.
+                const image = await requestIroned(original);
+                const now = get();
+                if (!findProduct(productId)?.photos.some((ph) => ph.id === photoId)) {
+                  return { ok: false, error: "That photo was removed." };
+                }
+                if (now.images[photoId] !== original) {
+                  return { ok: false, error: "The photo changed while it was being ironed. Try again." };
+                }
+                return { ok: true, image };
+              } catch (error) {
+                return { ok: false, error: error instanceof Error ? error.message : "Couldn't iron the clothes." };
+              } finally {
+                ironRequests.delete(photoId);
+                set((s) => {
+                  const ironPending = { ...s.ironPending };
+                  delete ironPending[photoId];
+                  return { ironPending };
+                });
+              }
+            };
+            const request = run();
+            ironRequests.set(photoId, request);
+            return request;
+          },
+          acceptIroned: async (productId, photoId, image) => {
+            if (!findProduct(productId)?.photos.some((ph) => ph.id === photoId)) {
+              return { ok: false, error: "That photo is no longer here." };
+            }
+            try {
+              const stored = sync
+                ? await enqueueAwait(productId, () => sync.saveIroned(productId, photoId, image))
+                : image;
+              if (!findProduct(productId)?.photos.some((ph) => ph.id === photoId)) {
+                return { ok: false, error: "That photo was removed." };
+              }
+              set((s) => ({ images: { ...s.images, [ironedKey(photoId)]: stored } }));
+              if (demo) await photoDb.put(ironedKey(photoId), stored);
+              editPhoto(productId, photoId, (ph) => ({ ...ph, hasIroned: true, showIroned: true }));
+              return { ok: true };
+            } catch (error) {
+              return { ok: false, error: error instanceof Error ? error.message : "Couldn't save the ironed photo." };
+            }
+          },
+          setIroned: (productId, photoId, shown) => {
+            const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);
+            if (!photo?.hasIroned || !!photo.showIroned === shown) return;
+            editPhoto(productId, photoId, (ph) => ({ ...ph, showIroned: shown }));
+            enqueue(productId, () => sync!.setIronedShown(photoId, shown));
           },
           saveRefinement: async (productId, photoId, refinement) => {
             if (!findProduct(productId)?.photos.find((ph) => ph.id === photoId)?.hasCutout) {

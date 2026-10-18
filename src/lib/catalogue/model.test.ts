@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { cataloguePages, newCatalogue, pageCount, type CatalogueItem } from "./model";
+import type { Product } from "@/lib/inventory/types";
+
+import { catalogueItems, cataloguePages, newCatalogue, pageCount, type CatalogueItem } from "./model";
 import { catalogueHtml } from "./web";
 
 const item = (n: number): CatalogueItem => ({
@@ -40,5 +42,51 @@ describe("catalogue themes", () => {
     const html = catalogueHtml({ catalogue: newCatalogue("c4", { cover: false }), items: linked, storeName: "Jemima's" });
     expect(html).toContain(`<a class="photo" href="${link}" target="_blank"`);
     expect(html.match(/<a class="photo"/g)).toHaveLength(1); // the unlinked piece stays a plain photo
+  });
+});
+
+describe("photo backdrops", () => {
+  it("uses every tone in turn when there is nothing to contrast with", async () => {
+    const { backdropPicker, PHOTO_BACKDROPS } = await import("./model");
+    const pick = backdropPicker();
+    expect(PHOTO_BACKDROPS.map(() => pick())).toEqual(PHOTO_BACKDROPS);
+  });
+
+  it("puts light pieces on dark tones and dark pieces on light ones, taking turns", async () => {
+    const { backdropPicker } = await import("./model");
+    const pick = backdropPicker();
+    const light = 0.92;
+    const dark = 0.1;
+    // charcoal, olive, slate for light pieces; oatmeal, ecru, mist for dark ones.
+    expect([pick(light), pick(dark), pick(light), pick(light), pick(dark), pick(light)]).toEqual([
+      "#1f1e1d",
+      "#d9ccb6",
+      "#5d5f41",
+      "#5b636f",
+      "#ece4d4",
+      "#1f1e1d",
+    ]);
+  });
+
+  it("uses the furthest tone for a mid-tone piece", async () => {
+    const { backdropPicker } = await import("./model");
+    expect(backdropPicker()(0.55)).toBe("#1f1e1d");
+  });
+
+  it("follows the measured photo over the variant colour", async () => {
+    const product = {
+      id: "p1",
+      name: "Tee",
+      category: "Clothing",
+      type: "Tee",
+      priceCents: 1000,
+      variants: [{ id: "v1", colourName: "Black", colourHex: "#111111" }],
+      photos: [{ id: "ph1", variantId: "v1" }],
+    } as unknown as Product;
+    const catalogue = newCatalogue("c", { productIds: ["p1"], hideSoldOut: false });
+    const images = { ph1: "blob:photo" };
+    // A "black" variant whose photo is actually light gets a dark tone.
+    expect(catalogueItems(catalogue, [product], images, { "blob:photo": 0.9 })[0].cover.backdrop).toBe("#1f1e1d");
+    expect(catalogueItems(catalogue, [product], images)[0].cover.backdrop).toBe("#d9ccb6");
   });
 });

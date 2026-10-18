@@ -68,6 +68,38 @@ export function enhanceImage(dataUrl: string, options?: ProcessOptions) {
   );
 }
 
+/** Persist an accepted generated image. Previews are never uploaded, so cancelling leaves nothing to clean up. */
+export async function uploadAcceptedImage(
+  dataUrl: string,
+  { config = cloudinaryConfig() }: Pick<ProcessOptions, "config"> = {},
+): Promise<{ status: "done"; url: string } | { status: "unavailable" } | { status: "failed"; message: string }> {
+  if (!config) return { status: "unavailable" };
+  const match = /^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUrl);
+  if (!match) return { status: "failed", message: "That photo couldn't be read." };
+  const [, , base64] = match;
+  const publicId = `${FOLDER}/ironed-${createHash("sha256").update(base64).digest("hex").slice(0, 32)}`;
+  const params = { overwrite: "false", public_id: publicId, timestamp: String(Math.floor(Date.now() / 1000)) };
+  const form = new FormData();
+  for (const [key, value] of Object.entries(params)) form.set(key, value);
+  form.set("api_key", config.apiKey);
+  form.set("signature", signParams(params, config.apiSecret));
+  form.set("file", dataUrl);
+  try {
+    const response = await fetch(`https://api.cloudinary.com/v1_1/${config.cloudName}/image/upload`, {
+      method: "POST",
+      body: form,
+      signal: AbortSignal.timeout(30_000),
+    });
+    const body = (await response.json().catch(() => null)) as { secure_url?: string; error?: { message?: string } } | null;
+    if (!response.ok || !body?.secure_url) {
+      return { status: "failed", message: body?.error?.message ?? `Cloudinary upload failed (${response.status}).` };
+    }
+    return { status: "done", url: body.secure_url };
+  } catch {
+    return { status: "failed", message: "Couldn't reach Cloudinary." };
+  }
+}
+
 async function transform(
   dataUrl: string,
   transformation: (type: string) => Transformation,

@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { use, useEffect, useMemo, type ReactNode } from "react";
+import { use, useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { buttonStyles } from "@/components/inventory/primitives";
-import { catalogueItems } from "@/lib/catalogue/model";
+import { catalogueItems, coverUrls } from "@/lib/catalogue/model";
+import { photoLuminances } from "@/lib/catalogue/photo-tone";
 import { catalogueHtml } from "@/lib/catalogue/web";
-import type { Catalogue } from "@/lib/inventory/types";
+import type { Catalogue, Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
@@ -45,7 +46,8 @@ function WebView({ catalogue }: { catalogue: Catalogue }) {
   const images = useInventory((s) => s.images);
   const shopName = useInventory((s) => s.settings.shopName);
   const storeName = shopName.trim() || "Jemima's Designs";
-  const items = useMemo(() => catalogueItems(catalogue, products, images), [catalogue, products, images]);
+  const tones = usePhotoTones(catalogue, products, images);
+  const items = useMemo(() => catalogueItems(catalogue, products, images, tones), [catalogue, products, images, tones]);
   const { busy, preview, previewPdf, downloadWeb, closePreview } = useCatalogueExport(catalogue);
   // The same page customers get when it's downloaded, with live photo links.
   const html = useMemo(() => catalogueHtml({ catalogue, items, storeName }), [catalogue, items, storeName]);
@@ -95,6 +97,21 @@ function WebView({ catalogue }: { catalogue: Catalogue }) {
       <iframe srcDoc={html} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" title={catalogue.title || catalogue.name} className="min-h-0 w-full flex-1 border-0" />
     </Overlay>
   );
+}
+
+/** Measured garment luminance of the catalogue's cutout photos; fills in as photos are measured. */
+function usePhotoTones(catalogue: Catalogue, products: Product[], images: Record<string, string>) {
+  const urls = useMemo(() => coverUrls(catalogueItems(catalogue, products, images)), [catalogue, products, images]);
+  const key = urls.join(" ");
+  const [tones, setTones] = useState<Record<string, number>>({});
+  useEffect(() => {
+    let live = true;
+    photoLuminances(key ? key.split(" ") : []).then((measured) => live && setTones(measured));
+    return () => {
+      live = false;
+    };
+  }, [key]);
+  return tones;
 }
 
 function NotFound() {

@@ -1,7 +1,7 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
-import { Check, ChevronLeft, ChevronRight, LoaderCircle, RotateCw, Scissors, SquarePen, Undo2, WandSparkles, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, RotateCw, Scissors, Shirt, SquarePen, Undo2, WandSparkles, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -15,7 +15,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { nameColour, rotatePhoto } from "@/lib/inventory/colour";
-import { cutoutKey, enhancedKey, maskKey, photoSrc, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
+import { cutoutKey, enhancedKey, ironedKey, maskKey, photoSrc, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
 import { plural } from "@/lib/inventory/format";
 import type { Photo, Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
@@ -135,6 +135,7 @@ function PhotoTile({
   const original = useInventory((s) => s.images[photo.id]);
   const cutout = useInventory((s) => s.images[cutoutKey(photo.id)]);
   const refined = useInventory((s) => s.images[refinedKey(photo.id)]);
+  const ironed = useInventory((s) => s.images[ironedKey(photo.id)]);
   const mask = useInventory((s) => s.images[maskKey(photo.id)]);
   const enhanced = {
     original: useInventory((s) => s.images[enhancedKey(photo.id, "original")]),
@@ -143,6 +144,7 @@ function PhotoTile({
   };
   const removingBackground = useInventory((s) => !!s.cutoutPending[photo.id]);
   const enhancing = useInventory((s) => !!s.enhancePending[photo.id]);
+  const ironing = useInventory((s) => !!s.ironPending[photo.id]);
   const {
     makeCover,
     removePhoto,
@@ -153,15 +155,21 @@ function PhotoTile({
     restoreOriginal,
     enhance,
     setEnhanced,
+    ironClothes,
+    acceptIroned,
+    setIroned,
   } = useInventory((s) => s);
   const [rotating, setRotating] = useState(false);
   const [refining, setRefining] = useState(false);
   /** An enhance (true) or undo (false) not yet saved; null when nothing is pending. */
   const [draft, setDraft] = useState<boolean | null>(null);
+  const [ironDraft, setIronDraft] = useState<string | null>(null);
+  const [savingIroned, setSavingIroned] = useState(false);
   const showingCutout = !!(photo.showCutout && cutout);
   const version: PhotoVersion = showingCutout ? (photo.refined && refined ? "refined" : "cutout") : "original";
   const showingEnhanced = !!((draft ?? photo.enhanced) && enhanced[version]);
-  const imageUrl = showingEnhanced ? enhanced[version] : showingCutout ? (photo.refined && refined) || cutout : original;
+  const showingIroned = !!(photo.showIroned && ironed);
+  const imageUrl = ironDraft || (showingIroned ? ironed : showingEnhanced ? enhanced[version] : showingCutout ? (photo.refined && refined) || cutout : original);
   const variant = product.variants.find((v) => v.id === photo.variantId);
   const hex = variant?.colourHex ?? photo.hex;
   const variantLabel = (v: { colourName: string; style: string }) => v.colourName + (v.style ? ` · ${v.style}` : "");
@@ -218,6 +226,22 @@ function PhotoTile({
     setDraft(null);
   };
 
+  const toggleIron = async () => {
+    if (showingIroned) return setIroned(product.id, photo.id, false);
+    if (photo.hasIroned) return setIroned(product.id, photo.id, true);
+    const result = await ironClothes(product.id, photo.id);
+    if (result.ok) setIronDraft(result.image);
+    else toast.error(result.error, { action: { label: "Retry", onClick: toggleIron } });
+  };
+  const saveIroned = async () => {
+    if (!ironDraft || savingIroned) return;
+    setSavingIroned(true);
+    const result = await acceptIroned(product.id, photo.id, ironDraft);
+    setSavingIroned(false);
+    if (result.ok) setIronDraft(null);
+    else toast.error(result.error);
+  };
+
   const chip = "rounded-full bg-card/92 text-[11px] font-medium transition-colors hover:bg-white";
   const iconChip = cn(chip, "flex size-[26px] items-center justify-center disabled:opacity-60");
 
@@ -242,7 +266,7 @@ function PhotoTile({
             <button
               type="button"
               onClick={rotate}
-              disabled={rotating || removingBackground || enhancing || draft !== null}
+              disabled={rotating || removingBackground || enhancing || ironing || savingIroned || draft !== null || ironDraft !== null || showingIroned}
               title="Rotate photo"
               aria-label="Rotate photo"
               className={iconChip}
@@ -258,61 +282,86 @@ function PhotoTile({
           <div className="absolute right-1.5 bottom-1.5 flex gap-1">
             <button
               type="button"
-              onClick={toggleEnhance}
-              disabled={enhancing || removingBackground || rotating}
-              aria-busy={enhancing}
-              aria-pressed={showingEnhanced}
-              title={enhancing ? "Enhancing…" : showingEnhanced ? "Undo Enhance" : "Enhance Image"}
-              aria-label={showingEnhanced ? "Undo Enhance" : "Enhance Image"}
-              className={cn(iconChip, showingEnhanced && "bg-primary text-primary-foreground hover:bg-primary/85")}
+              onClick={toggleIron}
+              disabled={ironing || savingIroned || rotating || removingBackground || enhancing || draft !== null || ironDraft !== null}
+              aria-busy={ironing || savingIroned}
+              aria-pressed={showingIroned}
+              title={ironing ? "Ironing clothes…" : savingIroned ? "Saving…" : showingIroned ? "Restore Previous" : photo.hasIroned ? "Show Ironed Version" : "Iron Clothes"}
+              aria-label={showingIroned ? "Restore Previous" : photo.hasIroned ? "Show Ironed Version" : "Iron Clothes"}
+              className={cn(iconChip, showingIroned && "bg-primary text-primary-foreground hover:bg-primary/85")}
             >
-              {enhancing ? <LoaderCircle className="size-3.5 animate-spin" /> : <WandSparkles className="size-3.5" />}
+              {ironing || savingIroned ? <LoaderCircle className="size-3.5 animate-spin" /> : showingIroned ? <Undo2 className="size-3.5" /> : <Shirt className="size-3.5" />}
             </button>
-            {draft !== null ? (
+            {ironDraft ? (
               <>
-                <button type="button" onClick={() => setDraft(null)} title="Cancel" aria-label="Cancel" className={iconChip}>
+                <button type="button" onClick={() => setIronDraft(null)} disabled={savingIroned} title="Cancel" aria-label="Cancel ironed preview" className={iconChip}>
                   <X className="size-3.5" />
                 </button>
-                <button type="button" onClick={saveEnhanced} title="Save" aria-label="Save" className={iconChip}>
+                <button type="button" onClick={saveIroned} disabled={savingIroned} title="Accept" aria-label="Accept ironed preview" className={iconChip}>
                   <Check className="size-3.5" />
                 </button>
               </>
-            ) : showingCutout ? (
+            ) : !showingIroned ? (
               <>
                 <button
                   type="button"
-                  onClick={() => setRefining(true)}
-                  disabled={rotating || enhancing}
-                  title="Refine Image"
-                  aria-label="Refine Image"
-                  className={iconChip}
+                  onClick={toggleEnhance}
+                  disabled={removingBackground || enhancing || rotating}
+                  aria-busy={enhancing}
+                  aria-pressed={showingEnhanced}
+                  title={enhancing ? "Enhancing…" : showingEnhanced ? "Undo Enhance" : "Enhance Image"}
+                  aria-label={showingEnhanced ? "Undo Enhance" : "Enhance Image"}
+                  className={cn(iconChip, showingEnhanced && "bg-primary text-primary-foreground hover:bg-primary/85")}
                 >
-                  <SquarePen className="size-3.5" />
+                  {enhancing ? <LoaderCircle className="size-3.5 animate-spin" /> : <WandSparkles className="size-3.5" />}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => restoreOriginal(product.id, photo.id)}
-                  disabled={enhancing}
-                  title="Restore Original"
-                  aria-label="Restore Original"
-                  className={iconChip}
-                >
-                  <Undo2 className="size-3.5" />
-                </button>
+                {draft !== null ? (
+                  <>
+                    <button type="button" onClick={() => setDraft(null)} title="Cancel" aria-label="Cancel" className={iconChip}>
+                      <X className="size-3.5" />
+                    </button>
+                    <button type="button" onClick={saveEnhanced} title="Save" aria-label="Save" className={iconChip}>
+                      <Check className="size-3.5" />
+                    </button>
+                  </>
+                ) : showingCutout ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setRefining(true)}
+                      disabled={rotating || enhancing}
+                      title="Refine Image"
+                      aria-label="Refine Image"
+                      className={iconChip}
+                    >
+                      <SquarePen className="size-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => restoreOriginal(product.id, photo.id)}
+                      disabled={enhancing}
+                      title="Restore Original"
+                      aria-label="Restore Original"
+                      className={iconChip}
+                    >
+                      <Undo2 className="size-3.5" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={dropBackground}
+                    disabled={removingBackground || enhancing || rotating}
+                    aria-busy={removingBackground}
+                    title={removingBackground ? "Removing background…" : "Remove Background"}
+                    aria-label="Remove Background"
+                    className={iconChip}
+                  >
+                    {removingBackground ? <LoaderCircle className="size-3.5 animate-spin" /> : <Scissors className="size-3.5" />}
+                  </button>
+                )}
               </>
-            ) : (
-              <button
-                type="button"
-                onClick={dropBackground}
-                disabled={removingBackground || enhancing || rotating}
-                aria-busy={removingBackground}
-                title={removingBackground ? "Removing background…" : "Remove Background"}
-                aria-label="Remove Background"
-                className={iconChip}
-              >
-                {removingBackground ? <LoaderCircle className="size-3.5 animate-spin" /> : <Scissors className="size-3.5" />}
-              </button>
-            )}
+            ) : null}
           </div>
         )}
       </PhotoFill>

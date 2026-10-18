@@ -16,6 +16,8 @@ export const PAGE_W = 595.28;
 export const PAGE_H = 841.89;
 /** Photos are embedded at this many pixels per point (~180 dpi). */
 const PHOTO_DENSITY = 2.5;
+/** Width of the diagonal stripes on placeholders and photo backdrops. */
+const STRIPE_PT = 1.875;
 
 export const FONT_FILES = {
   serif: "InstrumentSerif-Regular.ttf",
@@ -187,7 +189,7 @@ export function createPhotoEmbedder(doc: PDFDocument) {
     if (!cache.has(key)) {
       cache.set(
         key,
-        renderPhoto(box.ref, { width: w, height: h, stripe: 7.5 * PHOTO_DENSITY, shape, shade: box.shade }).then(({ bytes, type }) =>
+        renderPhoto(box.ref, { width: w, height: h, stripe: STRIPE_PT * PHOTO_DENSITY, shape, shade: box.shade }).then(({ bytes, type }) =>
           type === "image/png" ? doc.embedPng(bytes) : doc.embedJpg(bytes),
         ),
       );

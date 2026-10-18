@@ -21,9 +21,13 @@ const coverRef = (catalogue: Catalogue, items: CatalogueItem[]): PhotoRef => {
 };
 
 /** CSS `background` for a photo, matching `photoBackground()` in the dashboard. */
+/** 2.5px stripes: 1.875pt, as in the PDF. */
+const STRIPES = "repeating-linear-gradient(135deg, rgba(255,255,255,.07) 0 2.5px, rgba(0,0,0,0) 2.5px 5px)";
+
 export function photoCss({ hex, imageUrl, backdrop }: PhotoRef) {
-  if (imageUrl) return `center / cover no-repeat url("${imageUrl}") ${backdrop ?? ""}`.trimEnd();
-  return `repeating-linear-gradient(135deg, rgba(255,255,255,.07) 0 10px, rgba(0,0,0,0) 10px 20px), ${hex || "#d9d1c4"}`;
+  // Transparent (background-removed) photos sit on the striped backdrop tone.
+  if (imageUrl) return `center / cover no-repeat url("${imageUrl}")${backdrop ? `, ${STRIPES}, ${backdrop}` : ""}`;
+  return `${STRIPES}, ${hex || "#d9d1c4"}`;
 }
 
 /** A photo block; with a link it opens the product's WhatsApp catalogue item in a new tab. */
@@ -240,8 +244,13 @@ ${items.length ? "" : `<p class="empty">No products in this catalogue yet.</p>`}
 /** The page to download and share, with every photo embedded. Browser-only. */
 export async function buildCatalogueHtml({ catalogue, items, storeName }: Omit<HtmlInput, "photos">) {
   try {
-    const embed = (ref: PhotoRef, width: number, height: number) =>
-      renderPhotoDataUrl(ref, { width, height }).then((url) => photoCss({ hex: ref.hex, imageUrl: url }));
+    // Stripes and backdrop tones stay CSS (the same width as in the PDF) rather than
+    // being baked into the image, where they'd scale with it.
+    const embed = async (ref: PhotoRef, width: number, height: number) => {
+      if (!ref.imageUrl) return photoCss(ref);
+      const url = await renderPhotoDataUrl({ ...ref, backdrop: undefined }, { width, height });
+      return photoCss({ ...ref, imageUrl: url });
+    };
     const photoItems = await mapLimit(items, 4, (item) => embed(item.cover, 640, 800));
     const cover = catalogue.cover ? await embed(coverRef(catalogue, items), 1200, 1400) : "";
     return catalogueHtml({ catalogue, items, storeName, photos: { cover, items: photoItems } });

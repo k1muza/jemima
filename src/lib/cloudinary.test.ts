@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 
-import { cloudinaryConfig, enhanceImage, removeBackground, signParams } from "./cloudinary";
+import { cloudinaryConfig, enhanceImage, removeBackground, signParams, uploadAcceptedImage } from "./cloudinary";
 
 const config = { cloudName: "demo-cloud", apiKey: "key", apiSecret: "secret" };
 const photo = "data:image/jpeg;base64,/9j/AAAA";
@@ -153,5 +153,18 @@ describe("enhanceImage", () => {
   it("is unavailable without credentials", async () => {
     expect(await enhanceImage(photo, { config: null })).toEqual({ status: "unavailable" });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("uploadAcceptedImage", () => {
+  it("uploads an accepted result under a deterministic ironed asset id", async () => {
+    fetchMock.mockResolvedValueOnce(Response.json({ secure_url: "https://res.cloudinary.com/demo/ironed.jpg" }));
+    expect(await uploadAcceptedImage(photo, { config })).toEqual({
+      status: "done",
+      url: "https://res.cloudinary.com/demo/ironed.jpg",
+    });
+    const form = fetchMock.mock.calls[0][1].body as FormData;
+    expect(form.get("public_id")).toMatch(/^jemimas-designs\/products\/ironed-/);
+    expect(form.get("api_secret")).toBeNull();
   });
 });

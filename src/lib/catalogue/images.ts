@@ -28,7 +28,7 @@ function drawCover(ctx: CanvasRenderingContext2D, image: ImageBitmap, width: num
   ctx.drawImage(image, (width - w) / 2, (height - h) / 2, w, h);
 }
 
-/** Matches `photoBackground()`: 135° stripes of 7% white over the colour. */
+/** 135° stripes of 7% white over the colour, like `photoBackground()` (catalogue stripes are narrower). */
 function drawPlaceholder(ctx: CanvasRenderingContext2D, hex: string, width: number, height: number, stripe: number) {
   ctx.fillStyle = hex || "#d9d1c4";
   ctx.fillRect(0, 0, width, height);
@@ -91,14 +91,12 @@ async function renderCanvas(ref: PhotoRef, { width, height, stripe, shape, shade
     clipShape(ctx, shape, canvas.width, canvas.height);
   }
   if (loaded) {
-    if (ref.backdrop) {
-      ctx.fillStyle = ref.backdrop;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
+    // The backdrop gets the same diagonal stripes as the colour placeholder.
+    if (ref.backdrop) drawPlaceholder(ctx, ref.backdrop, canvas.width, canvas.height, stripe ?? Math.max(2, canvas.width / 100));
     ctx.imageSmoothingQuality = "high";
     drawCover(ctx, loaded.bitmap, canvas.width, canvas.height);
   } else {
-    drawPlaceholder(ctx, ref.hex, canvas.width, canvas.height, stripe ?? Math.max(6, canvas.width / 25));
+    drawPlaceholder(ctx, ref.hex, canvas.width, canvas.height, stripe ?? Math.max(2, canvas.width / 100));
   }
   if (shade) {
     const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);

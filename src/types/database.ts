@@ -164,6 +164,7 @@ export type Database = {
           file_size: number | null;
           height: number | null;
           id: string;
+          ironed_path: string | null;
           mask_path: string | null;
           mime_type: string | null;
           product_id: string;
@@ -171,6 +172,7 @@ export type Database = {
           refined_path: string | null;
           show_cutout: boolean;
           show_enhanced: boolean;
+          show_ironed: boolean;
           sort_order: number;
           storage_path: string;
           uploaded_by: string | null;
@@ -187,6 +189,7 @@ export type Database = {
           file_size?: number | null;
           height?: number | null;
           id?: string;
+          ironed_path?: string | null;
           mask_path?: string | null;
           mime_type?: string | null;
           product_id: string;
@@ -194,6 +197,7 @@ export type Database = {
           refined_path?: string | null;
           show_cutout?: boolean;
           show_enhanced?: boolean;
+          show_ironed?: boolean;
           sort_order?: number;
           storage_path: string;
           uploaded_by?: string | null;
@@ -209,6 +213,7 @@ export type Database = {
           file_size?: number | null;
           height?: number | null;
           id?: string;
+          ironed_path?: string | null;
           mask_path?: string | null;
           mime_type?: string | null;
           product_id?: string;
@@ -216,6 +221,7 @@ export type Database = {
           refined_path?: string | null;
           show_cutout?: boolean;
           show_enhanced?: boolean;
+          show_ironed?: boolean;
           sort_order?: number;
           storage_path?: string;
           uploaded_by?: string | null;

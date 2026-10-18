@@ -38,6 +38,10 @@ export type Photo = {
   refined?: boolean;
   /** Show the enhanced copy of the current version (original, cutout or refined), when it exists. */
   enhanced?: boolean;
+  /** A separately stored AI-ironed version exists; the upload is never overwritten. */
+  hasIroned?: boolean;
+  /** Show the accepted AI-ironed version. False restores the previously displayed version. */
+  showIroned?: boolean;
 };
 
 export type Product = {

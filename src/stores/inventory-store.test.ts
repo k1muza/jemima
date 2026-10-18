@@ -12,7 +12,7 @@ const withAlphaOf = vi.hoisted(() => vi.fn(async (colour: string, alpha: string)
 vi.mock("@/lib/inventory/pixels", () => ({ withAlphaOf }));
 
 import type { SupabaseInventory } from "@/lib/backend/supabase-inventory";
-import { cutoutKey, enhancedKey, maskKey, photoKeys, photoSrc, refinedKey } from "@/lib/inventory/cutout";
+import { cutoutKey, enhancedKey, ironedKey, maskKey, photoKeys, photoSrc, refinedKey } from "@/lib/inventory/cutout";
 import type { Product } from "@/lib/inventory/types";
 
 import { createInventoryStore } from "./inventory-store";
@@ -607,6 +607,141 @@ describe("enhancement with Supabase", () => {
     expect(backend.saveEnhanced).toHaveBeenLastCalledWith("prod", "ph", "original", "data:image/jpeg;base64,R5");
     expect(store.getState().images[enhancedKey("ph", "original")]).toBe("data:image/jpeg;base64,R5");
     expect(fetchMock.mock.calls.filter(([url]) => url === "/api/enhance")).toHaveLength(1);
+  });
+});
+
+describe("AI clothes ironing", () => {
+  const IRONED = "data:image/jpeg;base64,BQY=";
+
+  function store() {
+    const demo = demoStore();
+    fetchMock.mockImplementation(async (url: string) =>
+      url === "/api/iron-clothes"
+        ? new Response(new Blob([new Uint8Array([5, 6])], { type: "image/jpeg" }))
+        : pngResponse(),
+    );
+    return demo;
+  }
+
+  it("creates a preview manually without changing or overwriting the original", async () => {
+    const { store: s, productId, photoId, photo, shown } = store();
+    expect(fetchMock).not.toHaveBeenCalled();
+    const result = await s.getState().ironClothes(productId, photoId);
+    expect(result).toEqual({ ok: true, image: IRONED });
+    expect(shown()).toBe(ORIGINAL);
+    expect(photo().hasIroned).toBeFalsy();
+    expect(s.getState().images[photoId]).toBe(ORIGINAL);
+    expect(photoDb.put).not.toHaveBeenCalledWith(ironedKey(photoId), IRONED);
+  });
+
+  it("accepts, persists, restores previous, and reuses the saved version", async () => {
+    const { store: s, productId, photoId, photo, shown } = store();
+    const preview = await s.getState().ironClothes(productId, photoId);
+    if (!preview.ok) throw new Error(preview.error);
+    expect(await s.getState().acceptIroned(productId, photoId, preview.image)).toEqual({ ok: true });
+    expect(photo()).toMatchObject({ hasIroned: true, showIroned: true });
+    expect(shown()).toBe(IRONED);
+    expect(s.getState().images[photoId]).toBe(ORIGINAL);
+    expect(photoDb.put).toHaveBeenCalledWith(ironedKey(photoId), IRONED);
+
+    s.getState().setIroned(productId, photoId, false);
+    expect(shown()).toBe(ORIGINAL);
+    s.getState().setIroned(productId, photoId, true);
+    expect(shown()).toBe(IRONED);
+    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/iron-clothes")).toHaveLength(1);
+  });
+
+  it("joins duplicate clicks into one paid request", async () => {
+    const { store: s, productId, photoId } = store();
+    let finish!: (response: Response) => void;
+    fetchMock.mockImplementationOnce(() => new Promise<Response>((resolve) => (finish = resolve)));
+    const first = s.getState().ironClothes(productId, photoId);
+    const second = s.getState().ironClothes(productId, photoId);
+    expect(s.getState().ironPending[photoId]).toBe(true);
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    finish(new Response(new Blob([new Uint8Array([5, 6])], { type: "image/jpeg" })));
+    expect(await first).toEqual({ ok: true, image: IRONED });
+    expect(await second).toEqual({ ok: true, image: IRONED });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(s.getState().ironPending).toEqual({});
+  });
+
+  it("preserves a cutout and manual refinement when accepting and undoing", async () => {
+    const { store: s, productId, photoId, shown } = store();
+    await s.getState().removeBackground(productId, photoId);
+    await s.getState().saveRefinement(productId, photoId, { refined: REFINED, mask: MASK });
+    const preview = await s.getState().ironClothes(productId, photoId);
+    if (!preview.ok) throw new Error(preview.error);
+    await s.getState().acceptIroned(productId, photoId, preview.image);
+    expect(shown()).toBe(IRONED);
+    s.getState().setIroned(productId, photoId, false);
+    expect(shown()).toBe(REFINED);
+    expect(s.getState().images[maskKey(photoId)]).toBe(MASK);
+  });
+
+  it("leaves the active image untouched on API failure or cancel", async () => {
+    const { store: s, productId, photoId, shown } = store();
+    fetchMock.mockResolvedValueOnce(Response.json({ error: "AI ironing is busy right now." }, { status: 429 }));
+    expect(await s.getState().ironClothes(productId, photoId)).toEqual({ ok: false, error: "AI ironing is busy right now." });
+    expect(shown()).toBe(ORIGINAL);
+    expect(s.getState().images[ironedKey(photoId)]).toBeUndefined();
+    // A successful preview that is not accepted is equally non-destructive.
+    expect((await s.getState().ironClothes(productId, photoId)).ok).toBe(true);
+    expect(shown()).toBe(ORIGINAL);
+  });
+
+  it("persists the active selection through a demo reload", async () => {
+    const { store: s, productId, photoId } = store();
+    const preview = await s.getState().ironClothes(productId, photoId);
+    if (!preview.ok) throw new Error(preview.error);
+    await s.getState().acceptIroned(productId, photoId, preview.image);
+    const reloaded = createInventoryStore({ mode: "demo" });
+    await reloaded.persist.rehydrate();
+    reloaded.getState().setImages({ [photoId]: ORIGINAL, [ironedKey(photoId)]: IRONED });
+    const photo = reloaded.getState().products.find((p) => p.id === productId)!.photos[0];
+    expect(photoSrc(reloaded.getState().images, photo)).toBe(IRONED);
+  });
+
+  it("uploads and persists an accepted result with Supabase, then restores without uploading again", async () => {
+    const backend = {
+      saveIroned: vi.fn(async () => "https://res.cloudinary.com/demo/ironed.jpg"),
+      setIronedShown: vi.fn(async () => {}),
+    };
+    const s = createInventoryStore({ mode: "supabase", backend: backend as unknown as SupabaseInventory });
+    const product: Product = {
+      id: "prod",
+      name: "Linen dress",
+      category: "Clothing",
+      type: "",
+      sku: "",
+      costCents: 0,
+      priceCents: 0,
+      sizes: ["M"],
+      variants: [],
+      photos: [{ id: "ph", variantId: "", hex: "#aa3344" }],
+      updatedAt: new Date().toISOString(),
+    };
+    s.setState({ products: [product], images: { ph: ORIGINAL } });
+    expect(await s.getState().acceptIroned("prod", "ph", IRONED)).toEqual({ ok: true });
+    expect(backend.saveIroned).toHaveBeenCalledWith("prod", "ph", IRONED);
+    expect(photoSrc(s.getState().images, s.getState().products[0].photos[0])).toBe("https://res.cloudinary.com/demo/ironed.jpg");
+    s.getState().setIroned("prod", "ph", false);
+    s.getState().setIroned("prod", "ph", true);
+    await s.getState().flushPending();
+    expect(backend.saveIroned).toHaveBeenCalledOnce();
+    expect(backend.setIronedShown.mock.calls).toEqual([["ph", false], ["ph", true]]);
+  });
+
+  it("keeps the previous image active when Cloudinary persistence fails", async () => {
+    const backend = { saveIroned: vi.fn(async () => { throw new Error("Storage unavailable"); }) };
+    const s = createInventoryStore({ mode: "supabase", backend: backend as unknown as SupabaseInventory });
+    const product: Product = {
+      id: "prod", name: "Dress", category: "Clothing", type: "", sku: "", costCents: 0, priceCents: 0,
+      sizes: ["M"], variants: [], photos: [{ id: "ph", variantId: "", hex: "#aa3344" }], updatedAt: new Date().toISOString(),
+    };
+    s.setState({ products: [product], images: { ph: ORIGINAL } });
+    expect(await s.getState().acceptIroned("prod", "ph", IRONED)).toEqual({ ok: false, error: "Storage unavailable" });
+    expect(photoSrc(s.getState().images, s.getState().products[0].photos[0])).toBe(ORIGINAL);
   });
 });
 

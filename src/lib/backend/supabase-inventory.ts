@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { cutoutKey, enhancedKey, maskKey, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
+import { cutoutKey, enhancedKey, ironedKey, maskKey, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
 import { seedSettings } from "@/lib/inventory/seed";
 import type {
   Access,
@@ -133,7 +133,7 @@ const PRODUCT_SELECT = `
     id, colour_name, colour_hex, colour_status, style_label, sort_order, created_at,
     inventory_skus ( quantity_on_hand, product_sizes ( label ) )
   ),
-  product_images ( id, variant_id, detected_hex, sort_order, created_at, storage_path, cutout_path, show_cutout, refined_path, mask_path, enhanced_path, cutout_enhanced_path, refined_enhanced_path, show_enhanced )
+  product_images ( id, variant_id, detected_hex, sort_order, created_at, storage_path, cutout_path, show_cutout, refined_path, mask_path, enhanced_path, cutout_enhanced_path, refined_enhanced_path, show_enhanced, ironed_path, show_ironed )
 ` as const;
 
 /** Data access for the inventory, via the browser client. Row-level security decides what each person can see and do. */
@@ -239,6 +239,7 @@ export function createSupabaseInventory(supabase: Client) {
           .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
           .map((img) => {
             imagePaths.push({ id: img.id, path: img.storage_path });
+            if (img.ironed_path) imagePaths.push({ id: ironedKey(img.id), path: img.ironed_path });
             if (img.cutout_path) imagePaths.push({ id: cutoutKey(img.id), path: img.cutout_path });
             if (img.refined_path && img.mask_path) {
               imagePaths.push({ id: refinedKey(img.id), path: img.refined_path }, { id: maskKey(img.id), path: img.mask_path });
@@ -254,6 +255,7 @@ export function createSupabaseInventory(supabase: Client) {
               ...(img.cutout_path && { hasCutout: true, showCutout: img.show_cutout }),
               ...(img.cutout_path && img.refined_path && { refined: true }),
               ...(img.show_enhanced && { enhanced: true }),
+              ...(img.ironed_path && { hasIroned: true, showIroned: img.show_ironed }),
             };
           });
         const cost = Array.isArray(row.product_costs) ? row.product_costs[0] : row.product_costs;
@@ -275,18 +277,23 @@ export function createSupabaseInventory(supabase: Client) {
 
       const images: Record<string, string> = {};
       if (imagePaths.length) {
-        const signed = need(
-          check(
-            await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(
-              imagePaths.map((i) => i.path),
-              SIGNED_URL_SECONDS,
+        const remote = imagePaths.filter((i) => /^https:\/\//.test(i.path));
+        for (const { id, path } of remote) images[id] = path;
+        const stored = imagePaths.filter((i) => !/^https:\/\//.test(i.path));
+        if (stored.length) {
+          const signed = need(
+            check(
+              await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(
+                stored.map((i) => i.path),
+                SIGNED_URL_SECONDS,
+              ),
             ),
-          ),
-        );
-        const byPath = new Map(signed.map((s) => [s.path, s.signedUrl]));
-        for (const { id, path } of imagePaths) {
-          const url = byPath.get(path);
-          if (url) images[id] = url;
+          );
+          const byPath = new Map(signed.map((s) => [s.path, s.signedUrl]));
+          for (const { id, path } of stored) {
+            const url = byPath.get(path);
+            if (url) images[id] = url;
+          }
         }
       }
 
@@ -511,6 +518,22 @@ export function createSupabaseInventory(supabase: Client) {
     },
     async setEnhancedShown(photoId: string, shown: boolean) {
       check(await supabase.from("product_images").update({ show_enhanced: shown }).eq("id", photoId));
+    },
+    /** Accepted AI results live in Cloudinary; only the durable URL and active choice live in Supabase. */
+    async saveIroned(_productId: string, photoId: string, dataUrl: string) {
+      const response = await fetch("/api/iron-clothes/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: dataUrl }),
+        signal: AbortSignal.timeout(45_000),
+      });
+      const body = (await response.json().catch(() => ({}))) as { url?: string; error?: string };
+      if (!response.ok || !body.url) throw new Error(body.error || "Couldn't save the ironed photo.");
+      check(await supabase.from("product_images").update({ ironed_path: body.url, show_ironed: true }).eq("id", photoId));
+      return body.url;
+    },
+    async setIronedShown(photoId: string, shown: boolean) {
+      check(await supabase.from("product_images").update({ show_ironed: shown }).eq("id", photoId));
     },
     async assignPhoto(photoId: string, variantId: string) {
       check(await supabase.from("product_images").update({ variant_id: variantId }).eq("id", photoId));
