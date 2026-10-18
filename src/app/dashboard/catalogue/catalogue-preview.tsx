@@ -50,7 +50,7 @@ export function CataloguePreview({ file, onClose }: { file: CataloguePreviewFile
           onClick={() => downloadBlob(file.filename, file.blob)}
           className={`${pill} bg-sidebar-foreground text-primary hover:bg-white`}
         >
-          {file.kind === "pdf" ? "Download PDF" : "Download page"}
+          {"Download page"}
         </button>
       </div>
       <iframe src={file.url} title={file.filename} className="min-h-0 w-full flex-1 border-0 bg-white" />
