@@ -21,11 +21,18 @@ describe("catalogue themes", () => {
     expect(newCatalogue("c1").theme).toBe("Classic");
   });
 
-  it("fits six products to a grid page, or four in Lookbook", () => {
-    expect(cataloguePages(newCatalogue("c1"), items).map((p) => p.kind === "grid" && p.items.length)).toEqual([6, 3]);
-    const lookbook = newCatalogue("c2", { theme: "Lookbook" });
-    expect(cataloguePages(lookbook, items).map((p) => p.kind === "grid" && p.items.length)).toEqual([4, 4, 1]);
-    expect(pageCount(lookbook, items)).toBe(4); // with the cover
+  it("fits four products to each theme's grid pages", () => {
+    for (const theme of ["Classic", "Atelier", "Lookbook", "Boutique"] as const) {
+      const catalogue = newCatalogue("c1", { theme });
+      expect(cataloguePages(catalogue, items).map((p) => p.kind === "grid" && p.items.length)).toEqual([4, 4, 1]);
+      expect(pageCount(catalogue, items)).toBe(4); // including the cover
+    }
+  });
+
+  it("keeps one item per page for the Feature layout", () => {
+    const catalogue = newCatalogue("c2", { layout: "Feature" });
+    expect(cataloguePages(catalogue, items)).toHaveLength(9);
+    expect(pageCount(catalogue, items)).toBe(10);
   });
 
   it("builds the web page in the chosen design, escaping product text", () => {
