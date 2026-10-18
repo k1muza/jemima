@@ -102,11 +102,10 @@ async function atelierGrid(ctx: Context, page: GridPage) {
   const pdfPage = doc.addPage([PAGE_W, PAGE_H]);
   const box = atelierFrame(ctx, pdfPage, page.number);
 
-  const cols = 3;
+  const cols = 2;
   const colGap = px(24);
-  const rowGap = px(36);
+  const rowGap = px(22);
   const colW = (A_W - colGap * (cols - 1)) / cols;
-  const photoH = colW * 1.4;
   const num: TextStyle = { font: fonts.mono, size: px(9), color: A.subtle, spacing: px(9) * 0.1 };
   const name: TextStyle = { font: fonts.sansMedium, size: px(11), color: A.ink, spacing: px(11) * 0.08 };
   const price: TextStyle = { font: fonts.sans, size: px(11), color: A.muted };
@@ -115,6 +114,16 @@ async function atelierGrid(ctx: Context, page: GridPage) {
   const nameLh = name.size * 1.4;
   const priceLh = price.size * 1.4;
   const dots = { size: px(7), gap: px(5), style: more };
+  const rowCount = Math.ceil(page.items.length / cols);
+  const captionH =
+    px(12) + numLh + px(4) + 2 * nameLh +
+    (catalogue.showPrices ? priceLh : 0) +
+    (catalogue.showColours ? px(8) + px(11) : 0);
+  const available = box.bottom - box.top;
+  const photoH = Math.min(
+    colW * (rowCount === 1 ? 1.6 : 1.25),
+    (available - rowGap * (rowCount - 1)) / rowCount - captionH,
+  );
 
   const cells = page.items.map((item) => {
     const nameLines = wrap(item.name.toUpperCase(), name, colW, 2);
@@ -126,9 +135,10 @@ async function atelierGrid(ctx: Context, page: GridPage) {
   });
 
   const boxes: PlacedPhoto[] = [];
-  let rowTop = box.top;
-  for (let r = 0; r * cols < cells.length; r++) {
-    const row = cells.slice(r * cols, r * cols + cols);
+  const rows = Array.from({ length: rowCount }, (_, r) => cells.slice(r * cols, (r + 1) * cols));
+  const gridH = rows.reduce((h, row) => h + Math.max(...row.map((cell) => cell.height)), rowGap * (rowCount - 1));
+  let rowTop = box.top + Math.max(0, (available - gridH) / 2);
+  for (const row of rows) {
     row.forEach((cell, c) => {
       const x = A_X + c * (colW + colGap);
       boxes.push({ ref: cell.item.cover, x, top: rowTop, width: colW, height: photoH });
@@ -404,19 +414,29 @@ async function boutiqueGrid(ctx: Context, page: GridPage) {
   const pdfPage = doc.addPage([PAGE_W, PAGE_H]);
   const box = boutiqueFrame(ctx, pdfPage, page.number);
 
-  const cols = 3;
+  const cols = 2;
   const colGap = px(16);
   const rowGap = px(18);
   const pad = px(12);
   const colW = (B_W - colGap * (cols - 1)) / cols;
   const photoW = colW - pad * 2;
-  const photoH = photoW * 1.45;
   const name: TextStyle = { font: fonts.serif, size: px(19), color: B.ink };
   const price: TextStyle = { font: fonts.sansMedium, size: px(12), color: B.accent, spacing: px(12) * 0.04 };
   const more: TextStyle = { font: fonts.mono, size: px(9), color: B.subtle };
   const nameLh = name.size * 1.15;
   const priceLh = price.size * 1.4;
   const dots = { size: px(8), gap: px(5), style: more, align: "centre" as const };
+  const rowCount = Math.ceil(page.items.length / cols);
+  const captionH =
+    pad + px(12) + 2 * nameLh +
+    (catalogue.showPrices ? px(4) + priceLh : 0) +
+    (catalogue.showColours ? px(8) + px(11) : 0) +
+    pad + px(4);
+  const available = box.bottom - box.top;
+  const photoH = Math.min(
+    photoW * (rowCount === 1 ? 1.6 : 1.25),
+    (available - rowGap * (rowCount - 1)) / rowCount - captionH,
+  );
 
   const cells = page.items.map((item) => {
     const nameLines = wrap(item.name, name, photoW, 2);
@@ -428,9 +448,10 @@ async function boutiqueGrid(ctx: Context, page: GridPage) {
   });
 
   const boxes: PlacedPhoto[] = [];
-  let rowTop = box.top;
-  for (let r = 0; r * cols < cells.length; r++) {
-    const row = cells.slice(r * cols, r * cols + cols);
+  const rows = Array.from({ length: rowCount }, (_, r) => cells.slice(r * cols, (r + 1) * cols));
+  const gridH = rows.reduce((h, row) => h + Math.max(...row.map((cell) => cell.height)), rowGap * (rowCount - 1));
+  let rowTop = box.top + Math.max(0, (available - gridH) / 2);
+  for (const row of rows) {
     const rowH = Math.max(...row.map((cell) => cell.height));
     row.forEach((cell, c) => {
       const x = B_X + c * (colW + colGap);

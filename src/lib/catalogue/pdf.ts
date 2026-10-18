@@ -145,17 +145,26 @@ async function drawGridPage(ctx: Context, page: GridPage) {
   const pdfPage = doc.addPage([PAGE_W, PAGE_H]);
   const box = drawFrame(ctx, pdfPage, page.number);
 
-  const cols = 3;
+  const cols = 2;
   const colGap = 22 * PX;
-  const rowGap = 34 * PX;
+  const rowGap = 24 * PX;
   const gap = 10 * PX;
   const colW = (CONTENT_W - colGap * (cols - 1)) / cols;
-  const photoH = colW * 1.25;
   const name: TextStyle = { font: fonts.serif, size: 21 * PX, color: INK.ink };
   const nameLh = name.size * 1.1;
   const price: TextStyle = { font: fonts.sansMedium, size: 14 * PX, color: INK.ink };
   const col: TextStyle = { font: fonts.sans, size: 11 * PX, color: INK.muted };
   const dots = { dotSize: 9 * PX, dotGap: 6 * PX, colGap: 12 * PX, rowGap: 5 * PX };
+  const rowCount = Math.ceil(page.items.length / cols);
+  const colourH = catalogue.showColours ? gap + 2 * Math.max(dots.dotSize, col.size * 1.2) + dots.rowGap : 0;
+  const captionH = gap + 2 * nameLh + colourH;
+  // Reserve room for two name and colour lines so no caption can touch the footer.
+  // A partial final page may use taller photos, with the row centred vertically.
+  const available = box.bottom - box.top;
+  const photoH = Math.min(
+    colW * (rowCount === 1 ? 1.6 : 1.25),
+    (available - rowGap * (rowCount - 1)) / rowCount - captionH,
+  );
 
   const cells = page.items.map((item) => {
     const priceText = catalogue.showPrices ? item.price : "";
@@ -167,9 +176,10 @@ async function drawGridPage(ctx: Context, page: GridPage) {
   });
 
   const boxes: PlacedPhoto[] = [];
-  let rowTop = box.top;
-  for (let r = 0; r * cols < cells.length; r++) {
-    const row = cells.slice(r * cols, r * cols + cols);
+  const rows = Array.from({ length: rowCount }, (_, r) => cells.slice(r * cols, (r + 1) * cols));
+  const gridH = rows.reduce((h, row) => h + Math.max(...row.map((cell) => cell.height)), rowGap * (rowCount - 1));
+  let rowTop = box.top + Math.max(0, (available - gridH) / 2);
+  for (const row of rows) {
     row.forEach((cell, c) => {
       const x = PAD_X + c * (colW + colGap);
       boxes.push({ ref: cell.item.cover, x, top: rowTop, width: colW, height: photoH });

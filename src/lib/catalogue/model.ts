@@ -43,14 +43,14 @@ export const CATALOGUE_THEMES: {
     value: "Classic",
     label: "Classic",
     description: "Dark cover, warm paper, italic serif titles.",
-    perPage: 6,
+    perPage: 4,
     swatch: { page: "#fffdf9", ink: "#1a1714", accent: "#1a1714" },
   },
   {
     value: "Atelier",
     label: "Atelier",
     description: "Crisp white and lots of space. Small capitals, numbered pieces.",
-    perPage: 6,
+    perPage: 4,
     swatch: { page: "#ffffff", ink: "#111111", accent: "#d8d8d8" },
   },
   {
@@ -64,7 +64,7 @@ export const CATALOGUE_THEMES: {
     value: "Boutique",
     label: "Boutique",
     description: "Warm blush and terracotta, arched photo frames.",
-    perPage: 6,
+    perPage: 4,
     swatch: { page: "#f6ebe3", ink: "#3b2320", accent: "#b4553d" },
   },
 ];
