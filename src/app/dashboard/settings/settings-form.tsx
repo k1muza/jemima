@@ -8,7 +8,9 @@ import { ConfirmDialog } from "@/components/inventory/confirm-dialog";
 import { buttonStyles, PageHeader, Panel } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
+import { downloadBlob } from "@/lib/catalogue/images";
 import { csvDate, csvMoney, downloadCsv } from "@/lib/inventory/csv";
+import { safeFileName, zipProductPhotos } from "@/lib/inventory/photo-export";
 import { productUnits } from "@/lib/inventory/stock";
 import { CATEGORIES, type Category } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
@@ -28,6 +30,7 @@ function SettingsContent() {
   const settings = useInventory((s) => s.settings);
   const threshold = useInventory((s) => s.threshold);
   const products = useInventory((s) => s.products);
+  const images = useInventory((s) => s.images);
   const { updateSettings, setThreshold, resetDemo } = useInventory((s) => s);
   const isDemo = useInventory((s) => s.mode === "demo");
   const access = useAccess();
@@ -62,6 +65,24 @@ function SettingsContent() {
         csvMoney(p.priceCents),
       ]),
     );
+
+  const [photoProgress, setPhotoProgress] = useState<string | null>(null);
+  const exportPhotos = async () => {
+    setPhotoProgress("…");
+    try {
+      const { blob, count, missing } = await zipProductPhotos(products, images, (done, total) =>
+        setPhotoProgress(` ${done} of ${total}…`),
+      );
+      if (!blob) {
+        toast.error(missing ? "Couldn't load any photos. Try again." : "There are no photos to download yet.");
+        return;
+      }
+      downloadBlob(`${safeFileName(settings.shopName || "Products")} photos ${csvDate()}.zip`, blob);
+      toast(`${count} photo${count === 1 ? "" : "s"} downloaded${missing ? ` · ${missing} couldn't be loaded` : ""}`);
+    } finally {
+      setPhotoProgress(null);
+    }
+  };
 
   return (
     <>
@@ -184,6 +205,9 @@ function SettingsContent() {
         <div className="flex flex-wrap gap-2">
           <button type="button" onClick={exportProducts} className={buttonStyles.outline}>
             Export products CSV
+          </button>
+          <button type="button" onClick={exportPhotos} disabled={!!photoProgress} className={buttonStyles.outline}>
+            {photoProgress ? `Downloading photos${photoProgress}` : "Download all photos"}
           </button>
           {isDemo && (
             <ConfirmDialog
