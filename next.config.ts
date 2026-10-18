@@ -25,6 +25,10 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   cacheComponents: true,
+  // Server-side catalogue PDFs load bundled font files from disk on Vercel.
+  outputFileTracingIncludes: {
+    "/api/catalogue/pdf": ["./public/fonts/catalogue/**/*"],
+  },
   partialPrefetching: true,
   poweredByHeader: false,
   turbopack: {
