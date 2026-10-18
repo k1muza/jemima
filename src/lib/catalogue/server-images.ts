@@ -100,6 +100,7 @@ export function createServerPhotoRenderer() {
     const w = Math.max(1, Math.round(width));
     const h = Math.max(1, Math.round(height));
     const layers: { input: Buffer; blend: "over" }[] = [];
+    let sourceHasAlpha = false;
 
     if (ref.imageUrl) {
       if (!sources.has(ref.imageUrl)) sources.set(ref.imageUrl, downloadImage(ref.imageUrl));
