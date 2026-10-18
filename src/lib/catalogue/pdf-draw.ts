@@ -1,4 +1,4 @@
-import { rgb, setCharacterSpacing, type PDFDocument, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
+import { PDFString, rgb, setCharacterSpacing, type PDFDocument, type PDFFont, type PDFImage, type PDFPage } from "pdf-lib";
 
 import type { Catalogue } from "@/lib/inventory/types";
 
@@ -198,9 +198,23 @@ export function createPhotoEmbedder(doc: PDFDocument) {
 
 export async function drawImages(page: PDFPage, ctx: Context, boxes: PlacedPhoto[]) {
   const images = await Promise.all(boxes.map(ctx.photo));
-  boxes.forEach((box, i) =>
-    page.drawImage(images[i], { x: box.x, y: PAGE_H - box.top - box.height, width: box.width, height: box.height }),
-  );
+  boxes.forEach((box, i) => {
+    page.drawImage(images[i], { x: box.x, y: PAGE_H - box.top - box.height, width: box.width, height: box.height });
+    if (box.ref.link) addLink(page, ctx.doc, box.ref.link, box);
+  });
+}
+
+/** A clickable area that opens `url` (no visible border). */
+function addLink(page: PDFPage, doc: PDFDocument, url: string, { x, top, width, height }: PlacedPhoto) {
+  const y = PAGE_H - top - height;
+  const annot = doc.context.obj({
+    Type: "Annot",
+    Subtype: "Link",
+    Rect: [x, y, x + width, y + height],
+    Border: [0, 0, 0],
+    A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+  });
+  page.node.addAnnot(doc.context.register(annot));
 }
 
 // ───────────── Colour lists ─────────────

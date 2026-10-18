@@ -26,6 +26,14 @@ export function photoCss({ hex, imageUrl, backdrop }: PhotoRef) {
   return `repeating-linear-gradient(135deg, rgba(255,255,255,.07) 0 10px, rgba(0,0,0,0) 10px 20px), ${hex || "#d9d1c4"}`;
 }
 
+/** A photo block; with a link it opens the product's WhatsApp catalogue item in a new tab. */
+function photoHtml(className: string, background: string, label: string, link?: string) {
+  const style = `background:${escape(background)}`;
+  if (!link) return `<div class="${className}" role="img" aria-label="${escape(label)}" style="${style}"></div>`;
+  const name = label ? `${label} on WhatsApp` : "View on WhatsApp";
+  return `<a class="${className}" href="${escape(link)}" target="_blank" rel="noopener" aria-label="${escape(name)}" title="${escape(name)}" style="${style}"></a>`;
+}
+
 type HtmlInput = {
   catalogue: Catalogue;
   items: CatalogueItem[];
@@ -45,6 +53,7 @@ main{max-width:1240px;margin:0 auto;padding:clamp(40px,6vw,88px) clamp(20px,4vw,
 .grid{display:grid}
 article{display:flex;flex-direction:column;gap:14px;min-width:0}
 .photo{width:100%;aspect-ratio:4/5}
+a.photo,a.cover-photo{display:block;cursor:pointer}
 .caption{display:flex;flex-direction:column;gap:8px;min-width:0}
 .row{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
 .price{white-space:nowrap}
@@ -109,8 +118,8 @@ main{max-width:1440px}
 .eyebrow{font-family:'Geist Mono',monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#8f897f}
 .cover{position:relative;min-height:100vh;display:flex;background:#151412;color:#f4f1eb}
 .cover-photo{position:absolute;inset:0}
-.cover::after{content:"";position:absolute;inset:0;background:linear-gradient(to bottom,rgba(21,20,18,.5),rgba(21,20,18,0) 22%,rgba(21,20,18,0) 40%,rgba(21,20,18,.82))}
-.cover-text{position:relative;z-index:1;flex:1;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto 1fr;gap:24px;padding:clamp(24px,5vw,56px)}
+.cover::after{content:"";position:absolute;inset:0;pointer-events:none;background:linear-gradient(to bottom,rgba(21,20,18,.5),rgba(21,20,18,0) 22%,rgba(21,20,18,0) 40%,rgba(21,20,18,.82))}
+.cover-text{position:relative;z-index:1;flex:1;pointer-events:none;display:grid;grid-template-columns:1fr auto;grid-template-rows:auto 1fr;gap:24px;padding:clamp(24px,5vw,56px)}
 .cover .store{grid-area:1/1;font-family:'Instrument Serif',Georgia,serif;font-style:italic;font-size:28px;letter-spacing:0;text-transform:none;color:inherit}
 .cover .count{grid-area:1/2;align-self:center;color:inherit}
 .cover-title{grid-area:2/1/3/3;align-self:end;display:flex;flex-direction:column;gap:18px}
@@ -166,7 +175,6 @@ export function catalogueHtml({ catalogue, items, storeName, photos }: HtmlInput
   const title = escape(catalogue.title || catalogue.name || "Catalogue");
   const subtitle = escape(catalogue.subtitle);
   const pieces = `${items.length} ${items.length === 1 ? "piece" : "pieces"}`;
-  const bg = (css: string) => escape(css);
   const coverBg = photos?.cover ?? photoCss(coverRef(catalogue, items));
 
   const cards = items
@@ -179,7 +187,7 @@ export function catalogueHtml({ catalogue, items, storeName, photos }: HtmlInput
               .join("")}</div>`
           : "";
       return `<article>
-  <div class="photo" role="img" aria-label="${escape(item.name)}" style="background:${bg(photos?.items[i] ?? photoCss(item.cover))}"></div>
+  ${photoHtml("photo", photos?.items[i] ?? photoCss(item.cover), item.name, item.cover.link)}
   <div class="caption">
     <span class="no">${String(i + 1).padStart(2, "0")}</span>
     <div class="row"><h3>${escape(item.name)}</h3>${price}</div>
@@ -196,7 +204,7 @@ export function catalogueHtml({ catalogue, items, storeName, photos }: HtmlInput
     <div class="cover-title"><h1>${title}</h1>${subtitle ? `<p>${subtitle}</p>` : ""}</div>
     <div class="eyebrow count">${pieces}</div>
   </div>
-  <div class="cover-photo" role="img" aria-label="" style="background:${bg(coverBg)}"></div>
+  ${photoHtml("cover-photo", coverBg, "", coverRef(catalogue, items).link)}
 </section>`
     : "";
   const plainHead = catalogue.cover

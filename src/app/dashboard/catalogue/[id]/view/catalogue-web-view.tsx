@@ -92,7 +92,7 @@ function WebView({ catalogue }: { catalogue: Catalogue }) {
         </span>
       </div>
 
-      <iframe srcDoc={html} sandbox="allow-same-origin" title={catalogue.title || catalogue.name} className="min-h-0 w-full flex-1 border-0" />
+      <iframe srcDoc={html} sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" title={catalogue.title || catalogue.name} className="min-h-0 w-full flex-1 border-0" />
     </Overlay>
   );
 }

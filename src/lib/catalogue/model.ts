@@ -1,14 +1,16 @@
 import { photoSrc } from "@/lib/inventory/cutout";
 import { formatMoney } from "@/lib/inventory/format";
 import { productUnits, variantUnits } from "@/lib/inventory/stock";
+import { normalizeWhatsappCatalogUrl } from "@/lib/inventory/whatsapp";
 import type { Catalogue, CatalogueTheme, Product } from "@/lib/inventory/types";
 
 /**
  * A photo, or the product colour when there's no photo (drawn as a striped
  * placeholder). `backdrop` fills behind a transparent (background-removed)
- * photo; without one the photo stays see-through.
+ * photo; without one the photo stays see-through. `link` is the product's
+ * WhatsApp catalogue item, opened when the photo is clicked.
  */
-export type PhotoRef = { hex: string; imageUrl?: string; backdrop?: string };
+export type PhotoRef = { hex: string; imageUrl?: string; backdrop?: string; link?: string };
 
 /** One product as it appears in a catalogue. */
 export type CatalogueItem = {
@@ -140,8 +142,16 @@ function photoRef(product: Product, index: number, images: Record<string, string
   const photo = product.photos[index];
   if (!photo) return null;
   const variant = product.variants.find((v) => v.id === photo.variantId);
-  return { hex: variant?.colourHex ?? photo.hex ?? PLACEHOLDER_HEX, imageUrl: photoSrc(images, photo), backdrop };
+  return {
+    hex: variant?.colourHex ?? photo.hex ?? PLACEHOLDER_HEX,
+    imageUrl: photoSrc(images, photo),
+    backdrop,
+    link: whatsappLink(product),
+  };
 }
+
+/** Only well-formed WhatsApp catalogue links are made clickable. */
+const whatsappLink = (product: Product) => normalizeWhatsappCatalogUrl(product.whatsappCatalogUrl ?? "") || undefined;
 
 /** The products a catalogue prints, in product-list order. */
 export function catalogueItems(catalogue: Catalogue, products: Product[], images: Record<string, string>): CatalogueItem[] {
@@ -166,7 +176,7 @@ export function catalogueItems(catalogue: Catalogue, products: Product[], images
         type: p.type || p.category,
         price: p.priceCents ? formatMoney(p.priceCents) : "",
         colours,
-        cover: photoRef(p, 0, images, backdrop) ?? { hex: p.variants[0]?.colourHex ?? PLACEHOLDER_HEX },
+        cover: photoRef(p, 0, images, backdrop) ?? { hex: p.variants[0]?.colourHex ?? PLACEHOLDER_HEX, link: whatsappLink(p) },
         thumbs: [photoRef(p, 1, images, backdrop), photoRef(p, 2, images, backdrop)].filter((x): x is PhotoRef => !!x),
       };
     });

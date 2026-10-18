@@ -33,4 +33,12 @@ describe("catalogue themes", () => {
     expect(html).toContain("Jemima&#39;s");
     expect(html).not.toContain("<1>");
   });
+
+  it("links product photos to their WhatsApp catalogue item", () => {
+    const link = "https://wa.me/p/7429384729384723/263771234567";
+    const linked = [{ ...item(1), cover: { hex: "#cccccc", link } }, item(2)];
+    const html = catalogueHtml({ catalogue: newCatalogue("c4", { cover: false }), items: linked, storeName: "Jemima's" });
+    expect(html).toContain(`<a class="photo" href="${link}" target="_blank"`);
+    expect(html.match(/<a class="photo"/g)).toHaveLength(1); // the unlinked piece stays a plain photo
+  });
 });
