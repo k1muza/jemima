@@ -141,9 +141,10 @@ function CatalogueContent() {
 
 function ProductCard({ product, threshold }: { product: Product; threshold: number }) {
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const drop = useDropTarget(product.id);
   const status = productStatus(product, threshold);
-  const cover = coverOf(product, images);
+  const cover = coverOf(product, images, thumbs);
   const units = productUnits(product);
   const photoCount = product.photos.length;
 
@@ -244,11 +245,12 @@ function ProductTable({ products, threshold }: { products: Product[]; threshold:
 function ProductRow({ product, threshold }: { product: Product; threshold: number }) {
   const router = useRouter();
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const updateProduct = useInventory((s) => s.updateProduct);
   const access = useAccess();
   const drop = useDropTarget(product.id);
   const status = productStatus(product, threshold);
-  const cover = coverOf(product, images);
+  const cover = coverOf(product, images, thumbs);
   const href = `/dashboard/products/${product.id}`;
   const stop = (e: React.MouseEvent) => e.stopPropagation();
 

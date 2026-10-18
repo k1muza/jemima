@@ -426,8 +426,9 @@ type RowProps = { row: ProductRow; open: boolean; onToggle: () => void; onHistor
 
 function InventoryListItem({ row, open, onToggle, onHistory }: RowProps) {
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const { product, units } = row;
-  const cover = coverOf(product, images);
+  const cover = coverOf(product, images, thumbs);
   const name = product.name || "Untitled product";
   return (
     <li className="border-t border-line-soft first:border-t-0">
@@ -456,8 +457,9 @@ function InventoryListItem({ row, open, onToggle, onHistory }: RowProps) {
 function InventoryRow({ row, open, onToggle, onHistory }: RowProps) {
   const { canViewCosts } = useAccess();
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const { product, units } = row;
-  const cover = coverOf(product, images);
+  const cover = coverOf(product, images, thumbs);
   const name = product.name || "Untitled product";
   const colours = colourDots(product);
 

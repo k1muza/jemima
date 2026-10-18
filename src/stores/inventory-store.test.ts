@@ -804,3 +804,36 @@ describe("WhatsApp catalogue URL", () => {
     expect(productOf(reloaded, id).whatsappCatalogUrl).toBe(ITEM);
   });
 });
+
+describe("moving a photo between colour rows", () => {
+  const product = (store: ReturnType<typeof demoStore>["store"], id: string) => store.getState().products.find((p) => p.id === id)!;
+
+  it("does nothing when the photo is already alone in its own row", () => {
+    const { store, productId, photoId } = demoStore();
+    const before = product(store, productId).variants;
+    store.getState().assignPhoto(productId, photoId, "own");
+    store.getState().assignPhoto(productId, photoId, "own");
+    expect(product(store, productId).variants).toEqual(before);
+  });
+
+  it("drops the row left behind when it has no photos and no stock", () => {
+    const { store, productId, photoId } = demoStore();
+    store.getState().addPhoto(productId, ORIGINAL, "#aa3344"); // joins the same row
+    const second = product(store, productId).photos[1].id;
+    store.getState().assignPhoto(productId, second, "own");
+    expect(product(store, productId).variants).toHaveLength(2);
+    const [first, own] = product(store, productId).variants;
+
+    // Moving the second photo back empties its own row, which goes.
+    store.getState().assignPhoto(productId, second, first.id);
+    expect(product(store, productId).variants.map((v) => v.id)).toEqual([first.id]);
+
+    // A row holding stock stays.
+    store.getState().assignPhoto(productId, photoId, "own");
+    const kept = product(store, productId).variants[1];
+    store.getState().setQty(productId, kept.id, product(store, productId).sizes[0], 3);
+    store.getState().assignPhoto(productId, photoId, first.id);
+    expect(product(store, productId).variants.map((v) => v.id)).toEqual([first.id, kept.id]);
+    expect(own.id).not.toBe(kept.id);
+  });
+});

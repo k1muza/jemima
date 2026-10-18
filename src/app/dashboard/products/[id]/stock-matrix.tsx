@@ -3,18 +3,21 @@
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { ColourPicker } from "@/components/inventory/colour-picker";
 import { QtyInput } from "@/components/inventory/inputs";
-import { cellLevelClasses, cellLevelLabel, Panel, photoBackground, Swatch } from "@/components/inventory/primitives";
+import { cellLevelClasses, cellLevelLabel, Panel, photoBackground } from "@/components/inventory/primitives";
 import { photoSrc } from "@/lib/inventory/cutout";
 import { formatNumber } from "@/lib/inventory/format";
 import { nameColour } from "@/lib/inventory/colour";
 import { cellLevel, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
+import { thumbSrc } from "@/lib/inventory/thumbnail";
 import type { Product } from "@/lib/inventory/types";
 import { useInventory } from "@/providers/inventory-store-provider";
 
 export function StockMatrix({ product }: { product: Product }) {
   const threshold = useInventory((s) => s.threshold);
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const { setQty, updateVariant, removeVariant, addSize, removeSize, addPlainVariant, restoreProduct } = useInventory((s) => s);
   const [newSize, setNewSize] = useState("");
 
@@ -95,23 +98,16 @@ export function StockMatrix({ product }: { product: Product }) {
               return (
                 <div key={v.id} role="row" className="grid items-center gap-1 border-b border-line-soft px-[18px] py-2" style={{ gridTemplateColumns: columns }}>
                   <div role="rowheader" className="sticky left-0 z-[1] bg-card flex min-w-0 items-center gap-2 self-stretch">
-                    <span className="h-[42px] w-[34px] shrink-0 overflow-hidden rounded-md" style={photoBackground(v.colourHex, photo && photoSrc(images, photo))} />
-                    <label
-                      title="Pick this colour"
-                      className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-secondary focus-within:ring-2 focus-within:ring-ring"
-                    >
-                      <Swatch hex={v.colourHex} className="size-4" />
-                      <input
-                        type="color"
-                        value={v.colourHex}
-                        onChange={(e) => {
-                          const colourHex = e.target.value;
-                          updateVariant(product.id, v.id, { colourHex, colourName: nameColour(colourHex) });
-                        }}
-                        aria-label={`Pick colour for ${v.colourName || "this row"}`}
-                        className="absolute inset-0 cursor-pointer opacity-0"
-                      />
-                    </label>
+                    <span className="h-[42px] w-[34px] shrink-0 overflow-hidden rounded-md" style={photoBackground(v.colourHex, photo && thumbSrc(thumbs, photoSrc(images, photo)))} />
+                    <ColourPicker
+                      hex={v.colourHex}
+                      label={v.colourName}
+                      photos={product.photos.flatMap((ph) => {
+                        const url = ph.variantId === v.id ? thumbSrc(thumbs, photoSrc(images, ph)) : undefined;
+                        return url ? [url] : [];
+                      })}
+                      onChange={(colourHex) => updateVariant(product.id, v.id, { colourHex, colourName: nameColour(colourHex) })}
+                    />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <input
                         size={1}

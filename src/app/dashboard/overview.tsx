@@ -17,6 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { photoSrc } from "@/lib/inventory/cutout";
 import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
 import { cellLevel, lowCells, margin, productIssues, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
+import { thumbSrc } from "@/lib/inventory/thumbnail";
 import { CATEGORIES } from "@/lib/inventory/types";
 import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
@@ -33,6 +34,7 @@ function OverviewContent() {
   const threshold = useInventory((s) => s.threshold);
   const { canViewCosts } = useAccess();
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const setQty = useInventory((s) => s.setQty);
   // Rows edited this visit stay put even once they rise above the threshold.
   const [kept, setKept] = useState<string[]>([]);
@@ -111,7 +113,7 @@ function OverviewContent() {
           .filter((size) => qtyOf(v, size) <= threshold || kept.includes(`${p.id}|${v.id}|${size}`))
           .map((size) => {
             const photo = p.photos.find((ph) => ph.variantId === v.id) ?? p.photos[0];
-            return { key: `${p.id}|${v.id}|${size}`, product: p, variant: v, size, photoUrl: photo && photoSrc(images, photo) };
+            return { key: `${p.id}|${v.id}|${size}`, product: p, variant: v, size, photoUrl: photo && thumbSrc(thumbs, photoSrc(images, photo)) };
           }),
       ),
     )

@@ -22,6 +22,7 @@ import {
 import { coverOf } from "@/lib/inventory/catalogue";
 import { formatMoney, formatNumber, plural } from "@/lib/inventory/format";
 import { productUnits } from "@/lib/inventory/stock";
+import { thumbSrc } from "@/lib/inventory/thumbnail";
 import type { Catalogue, CataloguePageLayout, CatalogueTheme, Category } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
@@ -278,7 +279,8 @@ function DesignPanel({ catalogue, cover }: { catalogue: Catalogue; cover: PhotoR
 /** A tiny cover in each design, using the catalogue's own cover photo. */
 function ThemeThumb({ theme, cover }: { theme: CatalogueTheme; cover: PhotoRef }) {
   const { page, ink, accent } = themeInfo(theme).swatch;
-  const photo = (backdrop?: string) => photoBackground(cover.hex, cover.imageUrl, cover.backdrop ?? backdrop);
+  const thumbs = useInventory((s) => s.thumbs);
+  const photo = (backdrop?: string) => photoBackground(cover.hex, thumbSrc(thumbs, cover.imageUrl), cover.backdrop ?? backdrop);
   const bar = "block h-[3px] rounded-full";
   const frame = "relative flex aspect-3/4 overflow-hidden rounded-[5px]";
 
@@ -359,6 +361,7 @@ const DEPARTMENTS: { value: "All" | Category; label: string }[] = [
 function ProductsPanel({ catalogue }: { catalogue: Catalogue }) {
   const products = useInventory((s) => s.products);
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const updateCatalogue = useInventory((s) => s.updateCatalogue);
   const update = (patch: Partial<Catalogue>) => updateCatalogue(catalogue.id, patch);
 
@@ -453,7 +456,7 @@ function ProductsPanel({ catalogue }: { catalogue: Catalogue }) {
         {shown.map((p) => {
           const on = selectedSet.has(p.id);
           const units = productUnits(p);
-          const cover = coverOf(p, images);
+          const cover = coverOf(p, images, thumbs);
           return (
             <button
               key={p.id}

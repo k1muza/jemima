@@ -2,6 +2,7 @@ import type { CatalogueFilter, CatalogueSort } from "@/stores/inventory-store";
 
 import { photoSrc } from "./cutout";
 import { productIssues, productStatus, productUnits } from "./stock";
+import { thumbSrc } from "./thumbnail";
 import type { Product } from "./types";
 
 export const FILTERS: CatalogueFilter[] = ["All", "Clothing", "Shoes", "Low stock", "Needs details"];
@@ -69,11 +70,12 @@ export function colourDots(product: Product) {
     .map((v) => ({ hex: v.colourHex, name: v.colourName }));
 }
 
-export function coverOf(product: Product, images: Record<string, string>) {
+/** The cover photo for small spots (lists, cards): its thumbnail when there is one. */
+export function coverOf(product: Product, images: Record<string, string>, thumbs: Record<string, string>) {
   const photo = product.photos[0];
   const variant = photo && product.variants.find((v) => v.id === photo.variantId);
   return {
-    imageUrl: photo ? photoSrc(images, photo) : undefined,
+    imageUrl: photo ? thumbSrc(thumbs, photoSrc(images, photo)) : undefined,
     hex: variant?.colourHex ?? photo?.hex ?? product.variants[0]?.colourHex,
   };
 }

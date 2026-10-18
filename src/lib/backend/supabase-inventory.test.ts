@@ -28,13 +28,32 @@ function fakeClient(results: Record<string, unknown> = {}) {
     );
     return builder;
   };
+  /** Files in the photo bucket; signing a missing one returns no link, like Supabase. */
+  const stored = new Set<string>();
+  const bucket = {
+    createSignedUrls: async (paths: string[]) => ({
+      data: paths.map((path) => ({ path, signedUrl: stored.has(path) ? `https://storage.example/${path}?token=1` : null })),
+      error: null,
+    }),
+    upload: async (...args: unknown[]) => {
+      calls.push({ table: "storage", method: "upload", args });
+      stored.add(args[0] as string);
+      return { data: {}, error: null };
+    },
+    remove: async (paths: string[]) => {
+      calls.push({ table: "storage", method: "remove", args: [paths] });
+      paths.forEach((p) => stored.delete(p));
+      return { data: [], error: null };
+    },
+  };
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: "u1", email: "staff@example.com" } } }) },
     from: (table: string) => query(table),
+    storage: { from: () => bucket },
   };
   const writes = (table: string, method: "insert" | "update") =>
     calls.filter((c) => c.table === table && c.method === method).map((c) => c.args[0]);
-  return { client: client as unknown as Parameters<typeof createSupabaseInventory>[0], calls, writes };
+  return { client: client as unknown as Parameters<typeof createSupabaseInventory>[0], calls, writes, stored };
 }
 
 const product = (patch: Partial<Product> = {}): Product => ({
@@ -124,5 +143,82 @@ describe("WhatsApp catalogue URL in Supabase", () => {
     expect(calls.find((c) => c.table === "products" && c.method === "select")!.args[0]).toContain("whatsapp_catalog_url");
     expect(products.find((p) => p.id === "linked")!.whatsappCatalogUrl).toBe(ITEM);
     expect(products.find((p) => p.id === "plain")).not.toHaveProperty("whatsappCatalogUrl");
+  });
+});
+
+describe("Photo thumbnails in Supabase", () => {
+  const image = (patch: Record<string, unknown> = {}) => ({
+    id: "ph",
+    variant_id: null,
+    detected_hex: "#aabbcc",
+    sort_order: 0,
+    created_at: "2026-10-18T00:00:00Z",
+    storage_path: "prod/ph.jpg",
+    cutout_path: null,
+    show_cutout: false,
+    refined_path: null,
+    mask_path: null,
+    enhanced_path: null,
+    cutout_enhanced_path: null,
+    refined_enhanced_path: null,
+    show_enhanced: false,
+    ironed_path: null,
+    show_ironed: false,
+    updated_at: "2026-10-18T00:00:00Z",
+    ...patch,
+  });
+  const tables = (images: unknown[]) => ({
+    profiles: { role: "staff" },
+    products: [
+      {
+        id: "prod",
+        name: "",
+        category: "Clothing",
+        type: "",
+        sku: "",
+        default_price_cents: 0,
+        whatsapp_catalog_url: null,
+        updated_at: "2026-10-18T00:00:00Z",
+        product_costs: null,
+        product_sizes: [],
+        product_variants: [],
+        product_images: images,
+      },
+    ],
+    stock_movements: [],
+    shop_settings: { low_stock_threshold: 3 },
+    size_templates: [],
+    product_types: [],
+    catalogues: [],
+  });
+
+  it("pairs each file with its thumbnail, and lists files that have none", async () => {
+    const { client, stored } = fakeClient(
+      tables([image({ cutout_path: "prod/ph.cutout.png", refined_path: "prod/ph.refined.png", mask_path: "prod/ph.mask.png" })]),
+    );
+    ["prod/ph.jpg", "prod/ph.jpg.thumb", "prod/ph.cutout.png", "prod/ph.refined.png", "prod/ph.mask.png"].forEach((p) => stored.add(p));
+    const { images, thumbs, missingThumbs } = await createSupabaseInventory(client).load();
+
+    expect(thumbs).toEqual({ [images.ph]: "https://storage.example/prod/ph.jpg.thumb?token=1" });
+    // Masks are never shown, so they get no thumbnail.
+    expect(missingThumbs.map((m) => m.path)).toEqual(["prod/ph.cutout.png", "prod/ph.refined.png"]);
+    expect(missingThumbs[0].url).toBe(images["ph:cutout"]);
+  });
+
+  it("removes a photo's thumbnails with its files", async () => {
+    const { client, calls } = fakeClient();
+    await createSupabaseInventory(client).removePhoto("prod", "ph");
+    const removed = calls.find((c) => c.table === "storage" && c.method === "remove")!.args[0] as string[];
+    expect(removed).toEqual(expect.arrayContaining(["prod/ph.jpg", "prod/ph.jpg.thumb", "prod/ph.cutout.png.thumb"]));
+    expect(removed).not.toContain("prod/ph.mask.png.thumb");
+  });
+
+  it("drops the old thumbnail when a new one can't be made, so lists show the new file", async () => {
+    // No canvas in tests, so making the thumbnail fails.
+    const { client, stored } = fakeClient();
+    stored.add("prod/ph.jpg.thumb");
+    await createSupabaseInventory(client).replacePhotoFile("prod", "ph", "data:image/jpeg;base64,/9j/");
+    expect(stored.has("prod/ph.jpg")).toBe(true);
+    expect(stored.has("prod/ph.jpg.thumb")).toBe(false);
   });
 });

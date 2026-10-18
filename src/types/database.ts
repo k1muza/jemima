@@ -175,6 +175,7 @@ export type Database = {
           show_ironed: boolean;
           sort_order: number;
           storage_path: string;
+          updated_at: string;
           uploaded_by: string | null;
           variant_id: string | null;
           width: number | null;
@@ -200,6 +201,7 @@ export type Database = {
           show_ironed?: boolean;
           sort_order?: number;
           storage_path: string;
+          updated_at?: string;
           uploaded_by?: string | null;
           variant_id?: string | null;
           width?: number | null;
@@ -224,6 +226,7 @@ export type Database = {
           show_ironed?: boolean;
           sort_order?: number;
           storage_path?: string;
+          updated_at?: string;
           uploaded_by?: string | null;
           variant_id?: string | null;
           width?: number | null;

@@ -5,6 +5,7 @@ import { Check, ChevronLeft, ChevronRight, LoaderCircle, RotateCw, Scissors, Shi
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { ColourPicker } from "@/components/inventory/colour-picker";
 import { PhotoFill, Swatch } from "@/components/inventory/primitives";
 import {
   DropdownMenu,
@@ -17,6 +18,7 @@ import {
 import { nameColour, rotatePhoto } from "@/lib/inventory/colour";
 import { cutoutKey, enhancedKey, ironedKey, maskKey, photoSrc, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
 import { plural } from "@/lib/inventory/format";
+import { thumbSrc } from "@/lib/inventory/thumbnail";
 import type { Photo, Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useInventory } from "@/providers/inventory-store-provider";
@@ -145,6 +147,8 @@ function PhotoTile({
   const removingBackground = useInventory((s) => !!s.cutoutPending[photo.id]);
   const enhancing = useInventory((s) => !!s.enhancePending[photo.id]);
   const ironing = useInventory((s) => !!s.ironPending[photo.id]);
+  const thumbs = useInventory((s) => s.thumbs);
+  const images = useInventory((s) => s.images);
   const {
     makeCover,
     removePhoto,
@@ -158,6 +162,7 @@ function PhotoTile({
     ironClothes,
     acceptIroned,
     setIroned,
+    updateVariant,
   } = useInventory((s) => s);
   const [rotating, setRotating] = useState(false);
   const [refining, setRefining] = useState(false);
@@ -247,7 +252,7 @@ function PhotoTile({
 
   return (
     <div className="relative flex min-w-0 flex-col gap-2">
-      <PhotoFill hex={hex} imageUrl={imageUrl} label="sample photo" className="aspect-4/5 rounded-[10px]">
+      <PhotoFill hex={hex} imageUrl={thumbSrc(thumbs, imageUrl)} label="sample photo" className="aspect-4/5 rounded-[10px]">
         {imageUrl && (
           <button type="button" onClick={onZoom} aria-label="View larger" title="View larger" className="absolute inset-0 cursor-zoom-in" />
         )}
@@ -367,35 +372,52 @@ function PhotoTile({
       </PhotoFill>
       {refining && <RefineEditor productId={product.id} photo={photo} onClose={() => setRefining(false)} />}
 
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          title="Detected colour. Click to change which colour row this photo belongs to."
-          className="flex min-w-0 items-center gap-[7px] rounded-full border bg-card py-[5px] pr-2.5 pl-1.5 text-xs transition-colors hover:border-foreground"
-        >
-          <Swatch hex={hex} />
-          <span className="truncate font-medium">{variant ? variantLabel(variant) : "Unassigned"}</span>
-          <span className="ml-auto text-[10px] text-subtle">▾</span>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="min-w-48">
-          <DropdownMenuGroup>
-            <DropdownMenuLabel>Belongs to</DropdownMenuLabel>
-            {product.variants.map((v) => (
-              <DropdownMenuItem
-                key={v.id}
-                onClick={() => assignPhoto(product.id, photo.id, v.id)}
-                className={cn(v.id === photo.variantId && "bg-accent")}
-              >
-                <Swatch hex={v.colourHex} className="size-3" />
-                {variantLabel(v)}
-              </DropdownMenuItem>
-            ))}
-            <DropdownMenuItem onClick={() => assignPhoto(product.id, photo.id, "own")}>
-              <Swatch hex={photo.hex} className="size-3" />
-              Its own colour ({nameColour(photo.hex)})
-            </DropdownMenuItem>
-          </DropdownMenuGroup>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            title="Detected colour. Click to change which colour row this photo belongs to."
+            className="flex min-w-0 flex-1 items-center gap-[7px] rounded-full border bg-card py-[5px] pr-2.5 pl-1.5 text-xs transition-colors hover:border-foreground"
+          >
+            <Swatch hex={hex} />
+            <span className="truncate font-medium">{variant ? variantLabel(variant) : "Unassigned"}</span>
+            <span className="ml-auto text-[10px] text-subtle">▾</span>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="min-w-48">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Belongs to</DropdownMenuLabel>
+              {product.variants.map((v) => (
+                <DropdownMenuItem
+                  key={v.id}
+                  onClick={() => assignPhoto(product.id, photo.id, v.id)}
+                  className={cn(v.id === photo.variantId && "bg-accent")}
+                >
+                  <Swatch hex={v.colourHex} className="size-3" />
+                  {variantLabel(v)}
+                </DropdownMenuItem>
+              ))}
+              {(!variant || product.photos.some((ph) => ph.id !== photo.id && ph.variantId === photo.variantId)) && (
+                <DropdownMenuItem onClick={() => assignPhoto(product.id, photo.id, "own")}>
+                  <Swatch hex={photo.hex} className="size-3" />
+                  Its own colour ({nameColour(photo.hex)})
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {variant && (
+          <ColourPicker
+            trigger="pipette"
+            hex={variant.colourHex}
+            label={variantLabel(variant)}
+            // This photo first, then the row's other photos.
+            photos={[photo, ...product.photos.filter((ph) => ph.id !== photo.id && ph.variantId === variant.id)].flatMap((ph) => {
+              const url = thumbSrc(thumbs, ph.id === photo.id ? imageUrl : photoSrc(images, ph));
+              return url ? [url] : [];
+            })}
+            onChange={(colourHex) => updateVariant(product.id, variant.id, { colourHex, colourName: nameColour(colourHex) })}
+          />
+        )}
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useEffect } from "react";
 
 import { signOut } from "@/app/(auth)/actions";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { clearSignedUrlCache } from "@/lib/backend/signed-url-cache";
 import { useInventory } from "@/providers/inventory-store-provider";
 import {
   DropdownMenu,
@@ -59,7 +60,10 @@ export function UserMenuClient({ user }: UserMenuClientProps) {
           <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => signOut()}>
+        <DropdownMenuItem onClick={() => {
+            clearSignedUrlCache();
+            signOut();
+          }}>
           <LogOut />
           Sign out
         </DropdownMenuItem>

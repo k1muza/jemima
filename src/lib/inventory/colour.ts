@@ -1,11 +1,12 @@
 import type { Product, Variant } from "./types";
 
-const NAMED_COLOURS: [name: string, hex: string][] = [
+export const NAMED_COLOURS: readonly [name: string, hex: string][] = [
   ["Black", "#1d1d1f"], ["Charcoal", "#3f3f42"], ["Grey", "#8e8e8e"], ["Silver", "#c4c4c4"],
   ["White", "#f4f2ee"], ["Ivory", "#efe8d8"], ["Cream", "#e8dcc0"], ["Beige", "#d6c4a3"],
   ["Sand", "#cdb991"], ["Camel", "#b08653"], ["Tan", "#a87650"], ["Brown", "#6b4a33"],
   ["Chocolate", "#4a3326"], ["Olive", "#5b5a3a"], ["Khaki", "#a39e6e"], ["Sage", "#9caf88"],
-  ["Green", "#3f7a4a"], ["Forest", "#2f4a3a"], ["Teal", "#2f6f73"], ["Sky", "#a9c3d8"],
+  ["Green", "#3f7a4a"], ["Forest", "#2f4a3a"], ["Mint", "#a6dcc6"], ["Aqua", "#4fbfb4"],
+  ["Teal", "#2f6f73"], ["Sky", "#a9c3d8"],
   ["Blue", "#3b5ea8"], ["Denim", "#4a6283"], ["Navy", "#25304a"], ["Lilac", "#b8a6cf"],
   ["Purple", "#5e3f7a"], ["Pink", "#e8b4bc"], ["Rose", "#c97a86"], ["Red", "#b0322c"],
   ["Burgundy", "#6a2330"], ["Rust", "#9a4a2a"], ["Orange", "#d9772b"], ["Mustard", "#c9a03a"],
@@ -45,15 +46,112 @@ export function nameColour(hex: string) {
   return best[0];
 }
 
+/** "#abc" / "abcdef" / "#ABCDEF" → "#abcdef", or null when it isn't a hex colour. */
+export function normaliseHex(input: string) {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(input.trim());
+  if (!m) return null;
+  const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join("") : m[1];
+  return "#" + h.toLowerCase();
+}
+
+/**
+ * Average colour of the opaque pixels within `radius` of (x, y) in RGBA data.
+ * Averaging a small patch smooths out fabric texture and JPEG noise; fully
+ * transparent pixels (removed backgrounds) are ignored. Null when nothing opaque is there.
+ */
+export function sampleColour(
+  image: { data: ArrayLike<number>; width: number; height: number },
+  x: number,
+  y: number,
+  radius = 2,
+) {
+  const { data, width, height } = image;
+  const cx = Math.round(x), cy = Math.round(y);
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let py = Math.max(0, cy - radius); py <= Math.min(height - 1, cy + radius); py++) {
+    for (let px = Math.max(0, cx - radius); px <= Math.min(width - 1, cx + radius); px++) {
+      const k = (py * width + px) * 4;
+      if (data[k + 3] < 128) continue;
+      r += data[k]; g += data[k + 1]; b += data[k + 2]; n++;
+    }
+  }
+  return n ? rgbToHex(r / n, g / n, b / n) : null;
+}
+
 export function luminance(hex: string) {
   const [r, g, b] = hexToRgb(hex);
   return (0.299 * r + 0.587 * g + 0.114 * b) / 255;
 }
 
+type Rgb = [r: number, g: number, b: number];
+
+const bucketOf = (r: number, g: number, b: number) => ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
+
 /**
- * Predominant garment colour: ignores pixels close to the average border
- * colour (the background) and weights the centre of the frame.
+ * The background colours of a photo: every colour that covers a good share of
+ * the outer edge (a floor and a wall, a rug and its shadow). Averaging the edge
+ * into one colour instead would match neither part, and the background would
+ * then be mistaken for the garment. A colour that is also common in the middle
+ * of the frame (at least half as common there as at the edge) is the garment
+ * filling the shot, not background.
  */
+export function backgroundColours(image: { data: ArrayLike<number>; width: number; height: number }, minShare = 0.08): Rgb[] {
+  const { data: d, width: W, height: H } = image;
+  const band = Math.max(1, Math.round(Math.min(W, H) * 0.06));
+  const edge = new Map<number, { n: number; r: number; g: number; b: number }>();
+  const centre = new Map<number, number>();
+  let edgeTotal = 0, centreTotal = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const k = (y * W + x) * 4;
+      if (d[k + 3] < 128) continue;
+      const key = bucketOf(d[k], d[k + 1], d[k + 2]);
+      if (x >= band && x < W - band && y >= band && y < H - band) {
+        if (x >= W / 4 && x < (3 * W) / 4 && y >= H / 4 && y < (3 * H) / 4) {
+          centre.set(key, (centre.get(key) ?? 0) + 1);
+          centreTotal++;
+        }
+        continue;
+      }
+      const e = edge.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+      e.n++; e.r += d[k]; e.g += d[k + 1]; e.b += d[k + 2];
+      edge.set(key, e);
+      edgeTotal++;
+    }
+  }
+  return [...edge]
+    .filter(([key, e]) => e.n >= edgeTotal * minShare && (centre.get(key) ?? 0) / Math.max(1, centreTotal) < (0.5 * e.n) / edgeTotal)
+    .map(([, e]) => [e.r / e.n, e.g / e.n, e.b / e.n]);
+}
+
+/**
+ * Predominant garment colour: ignores pixels close to any background colour
+ * and weights the centre of the frame. Null when nothing but background is found.
+ */
+export function garmentColour(image: { data: ArrayLike<number>; width: number; height: number }) {
+  const { data: d, width: W, height: H } = image;
+  const background = backgroundColours(image);
+  const buckets = new Map<number, { w: number; r: number; g: number; b: number }>();
+  let opaque = 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const k = (y * W + x) * 4;
+      if (d[k + 3] < 128) continue;
+      opaque++;
+      const r = d[k], g = d[k + 1], b = d[k + 2];
+      if (background.some(([br, bg, bb]) => Math.hypot(r - br, g - bg, b - bb) < 48)) continue;
+      const w = 1.6 - Math.min(1, Math.hypot((x - W / 2) / (W / 2), (y - H / 2) / (H / 2)));
+      const key = bucketOf(r, g, b);
+      const e = buckets.get(key) ?? { w: 0, r: 0, g: 0, b: 0 };
+      e.w += w; e.r += r * w; e.g += g * w; e.b += b * w;
+      buckets.set(key, e);
+    }
+  }
+  let best: { w: number; r: number; g: number; b: number } | null = null;
+  for (const e of buckets.values()) if (!best || e.w > best.w) best = e;
+  return best && best.w > opaque * 0.005 ? rgbToHex(best.r / best.w, best.g / best.w, best.b / best.w) : null;
+}
+
 function dominantColour(img: HTMLImageElement) {
   const N = 64;
   const canvas = document.createElement("canvas");
@@ -61,34 +159,8 @@ function dominantColour(img: HTMLImageElement) {
   canvas.height = N;
   const ctx = canvas.getContext("2d")!;
   ctx.drawImage(img, 0, 0, N, N);
-  const d = ctx.getImageData(0, 0, N, N).data;
-
-  let br = 0, bg = 0, bb = 0, bn = 0;
-  for (let i = 0; i < N; i++) {
-    for (const [px, py] of [[i, 0], [i, N - 1], [0, i], [N - 1, i]]) {
-      const k = (py * N + px) * 4;
-      br += d[k]; bg += d[k + 1]; bb += d[k + 2]; bn++;
-    }
-  }
-  br /= bn; bg /= bn; bb /= bn;
-
-  const buckets: Record<number, { w: number; r: number; g: number; b: number }> = {};
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      const k = (y * N + x) * 4;
-      if (d[k + 3] < 128) continue;
-      const r = d[k], g = d[k + 1], b = d[k + 2];
-      if (Math.hypot(r - br, g - bg, b - bb) < 42) continue;
-      const w = 1.6 - Math.min(1, Math.hypot((x - N / 2) / (N / 2), (y - N / 2) / (N / 2)));
-      const key = ((r >> 5) << 6) | ((g >> 5) << 3) | (b >> 5);
-      const e = (buckets[key] ??= { w: 0, r: 0, g: 0, b: 0 });
-      e.w += w; e.r += r * w; e.g += g * w; e.b += b * w;
-    }
-  }
-
-  let best: (typeof buckets)[number] | null = null;
-  for (const e of Object.values(buckets)) if (!best || e.w > best.w) best = e;
-  return best && best.w > 20 ? rgbToHex(best.r / best.w, best.g / best.w, best.b / best.w) : rgbToHex(br, bg, bb);
+  const image = ctx.getImageData(0, 0, N, N);
+  return garmentColour(image) ?? sampleColour(image, N / 2, N / 2, N / 4) ?? "#9a948a";
 }
 
 function loadImage(file: Blob) {

@@ -8,6 +8,7 @@ import { buttonStyles, PageHeader, PhotoFill } from "@/components/inventory/prim
 import { Skeleton } from "@/components/ui/skeleton";
 import { catalogueItems, pageCount } from "@/lib/catalogue/model";
 import { plural } from "@/lib/inventory/format";
+import { thumbSrc } from "@/lib/inventory/thumbnail";
 import type { Catalogue } from "@/lib/inventory/types";
 import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
@@ -60,6 +61,7 @@ function ListContent() {
 function CatalogueCard({ catalogue }: { catalogue: Catalogue }) {
   const products = useInventory((s) => s.products);
   const images = useInventory((s) => s.images);
+  const thumbs = useInventory((s) => s.thumbs);
   const items = catalogueItems(catalogue, products, images);
   const cover = items[0]?.cover;
 
@@ -67,7 +69,7 @@ function CatalogueCard({ catalogue }: { catalogue: Catalogue }) {
     <Link href={`/dashboard/catalogue/${catalogue.id}`} className="group flex min-w-0 flex-col gap-3">
       <PhotoFill
         hex={cover?.hex ?? "#ebe5db"}
-        imageUrl={cover?.imageUrl}
+        imageUrl={thumbSrc(thumbs, cover?.imageUrl)}
         className="aspect-4/5 rounded-xl border transition-colors group-hover:border-foreground"
       />
       <span className="flex min-w-0 flex-col gap-1">

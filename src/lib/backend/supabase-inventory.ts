@@ -1,7 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { mapLimit } from "@/lib/catalogue/images";
 import { cutoutKey, enhancedKey, ironedKey, maskKey, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
 import { seedSettings } from "@/lib/inventory/seed";
+import { makeThumbnail } from "@/lib/inventory/thumbnail";
 import type {
   Access,
   Catalogue,
@@ -20,6 +22,8 @@ import type {
 import { normalizeWhatsappCatalogUrl } from "@/lib/inventory/whatsapp";
 import type { Database } from "@/types/database";
 
+import { cachedSignedUrls } from "./signed-url-cache";
+
 type Client = SupabaseClient<Database>;
 
 /** The stored column value: null for no link. The database rejects anything but the canonical form too. */
@@ -30,8 +34,15 @@ function whatsappCatalogUrlColumn(value: string | undefined) {
 }
 
 export const PHOTO_BUCKET = "product-images";
-/** Signed photo links last long enough for a working day; reloading refreshes them. */
-const SIGNED_URL_SECONDS = 60 * 60 * 12;
+/**
+ * Signed photo links are saved between visits (see `signed-url-cache.ts`) and
+ * reused while at least half their life is left, so a loaded page always has
+ * links good for a working day.
+ */
+const SIGNED_URL_SECONDS = 60 * 60 * 24;
+const SIGNED_URL_MIN_REMAINING_SECONDS = 60 * 60 * 12;
+/** Browsers may reuse a downloaded photo for a day; a changed file gets a new link (and URL). */
+const PHOTO_CACHE_SECONDS = String(60 * 60 * 24);
 const HISTORY_LIMIT = 1000;
 
 export const photoPath = (productId: string, photoId: string) => `${productId}/${photoId}.jpg`;
@@ -49,14 +60,21 @@ const ENHANCED_COLUMN = {
 const VERSIONS: PhotoVersion[] = ["original", "cutout", "refined"];
 const enhancedColumn = (version: PhotoVersion, path: string | null) =>
   ({ [ENHANCED_COLUMN[version]]: path }) as Partial<Record<(typeof ENHANCED_COLUMN)[PhotoVersion], string | null>>;
+/** The small copy stored beside a photo file (see `thumbnail.ts`). Masks have none. */
+export const thumbPath = (path: string) => `${path}.thumb`;
+/** A file and its thumbnail. */
+const withThumb = (path: string) => [path, thumbPath(path)];
 /** Every file of a photo (most may not exist; removing a missing file is harmless). */
 const photoFiles = (productId: string, photoId: string) => [
-  photoPath(productId, photoId),
-  cutoutPath(productId, photoId),
-  refinedPath(productId, photoId),
+  ...withThumb(photoPath(productId, photoId)),
+  ...withThumb(cutoutPath(productId, photoId)),
+  ...withThumb(refinedPath(productId, photoId)),
   maskPath(productId, photoId),
-  ...VERSIONS.map((v) => enhancedPath(productId, photoId, v)),
+  ...VERSIONS.flatMap((v) => withThumb(enhancedPath(productId, photoId, v))),
 ];
+
+/** A stored photo file that has no thumbnail yet, and its signed URL. */
+export type ThumbSource = { path: string; url: string };
 
 export type InventorySnapshot = {
   access: Access;
@@ -68,6 +86,10 @@ export type InventorySnapshot = {
   catalogues: Catalogue[];
   /** Photo id (or `cutoutKey(id)`, `refinedKey(id)`, `maskKey(id)`, `enhancedKey(id, version)`) → signed URL. */
   images: Record<string, string>;
+  /** Full file URL (a value of `images`) → its thumbnail's signed URL. */
+  thumbs: Record<string, string>;
+  /** Stored files without a thumbnail (uploaded before thumbnails existed). */
+  missingThumbs: ThumbSource[];
 };
 
 /** Data that must be present (a list or the settings row). */
@@ -133,11 +155,28 @@ const PRODUCT_SELECT = `
     id, colour_name, colour_hex, colour_status, style_label, sort_order, created_at,
     inventory_skus ( quantity_on_hand, product_sizes ( label ) )
   ),
-  product_images ( id, variant_id, detected_hex, sort_order, created_at, storage_path, cutout_path, show_cutout, refined_path, mask_path, enhanced_path, cutout_enhanced_path, refined_enhanced_path, show_enhanced, ironed_path, show_ironed )
+  product_images ( id, variant_id, detected_hex, sort_order, created_at, storage_path, cutout_path, show_cutout, refined_path, mask_path, enhanced_path, cutout_enhanced_path, refined_enhanced_path, show_enhanced, ironed_path, show_ironed, updated_at )
 ` as const;
 
 /** Data access for the inventory, via the browser client. Row-level security decides what each person can see and do. */
 export function createSupabaseInventory(supabase: Client) {
+  const upload = (path: string, file: Blob, contentType: string, upsert = true) =>
+    supabase.storage.from(PHOTO_BUCKET).upload(path, file, { contentType, upsert, cacheControl: PHOTO_CACHE_SECONDS });
+
+  /**
+   * Store a photo file, then its thumbnail. A thumbnail that can't be made is
+   * removed instead, so lists fall back to the new file rather than show the old one.
+   */
+  async function putPhotoFile(path: string, file: Blob, contentType: string) {
+    check(await upload(path, file, contentType));
+    try {
+      const thumb = await makeThumbnail(file);
+      check(await upload(thumbPath(path), thumb, thumb.type));
+    } catch {
+      await supabase.storage.from(PHOTO_BUCKET).remove([thumbPath(path)]);
+    }
+  }
+
   async function loadAccess() {
     const { data: auth } = await supabase.auth.getUser();
     const user = auth.user;
@@ -203,6 +242,8 @@ export function createSupabaseInventory(supabase: Client) {
           threshold: 3,
           catalogues: [],
           images: {},
+          thumbs: {},
+          missingThumbs: [],
         };
       }
 
@@ -217,7 +258,7 @@ export function createSupabaseInventory(supabase: Client) {
       ]);
 
       const rows = need(check(products));
-      const imagePaths: { id: string; path: string }[] = [];
+      const imagePaths: { id: string; path: string; version: string; thumb: boolean }[] = [];
       const mapped: Product[] = rows.map((row) => {
         const sizes = [...row.product_sizes].sort((a, b) => a.sort_order - b.sort_order).map((s) => s.label);
         const variants: Variant[] = [...row.product_variants]
@@ -238,15 +279,18 @@ export function createSupabaseInventory(supabase: Client) {
         const photos: Photo[] = [...row.product_images]
           .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
           .map((img) => {
-            imagePaths.push({ id: img.id, path: img.storage_path });
-            if (img.ironed_path) imagePaths.push({ id: ironedKey(img.id), path: img.ironed_path });
-            if (img.cutout_path) imagePaths.push({ id: cutoutKey(img.id), path: img.cutout_path });
+            // Every file of a photo is rewritten with a row update, so the row's time versions them all.
+            const add = (id: string, path: string, thumb = true) => imagePaths.push({ id, path, version: img.updated_at, thumb });
+            add(img.id, img.storage_path);
+            if (img.ironed_path) add(ironedKey(img.id), img.ironed_path);
+            if (img.cutout_path) add(cutoutKey(img.id), img.cutout_path);
             if (img.refined_path && img.mask_path) {
-              imagePaths.push({ id: refinedKey(img.id), path: img.refined_path }, { id: maskKey(img.id), path: img.mask_path });
+              add(refinedKey(img.id), img.refined_path);
+              add(maskKey(img.id), img.mask_path, false);
             }
             for (const v of VERSIONS) {
               const path = img[ENHANCED_COLUMN[v]];
-              if (path) imagePaths.push({ id: enhancedKey(img.id, v), path });
+              if (path) add(enhancedKey(img.id, v), path);
             }
             return {
               id: img.id,
@@ -276,23 +320,28 @@ export function createSupabaseInventory(supabase: Client) {
       });
 
       const images: Record<string, string> = {};
+      const thumbs: Record<string, string> = {};
+      const missingThumbs: ThumbSource[] = [];
       if (imagePaths.length) {
         const remote = imagePaths.filter((i) => /^https:\/\//.test(i.path));
         for (const { id, path } of remote) images[id] = path;
         const stored = imagePaths.filter((i) => !/^https:\/\//.test(i.path));
         if (stored.length) {
-          const signed = need(
-            check(
-              await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(
-                stored.map((i) => i.path),
-                SIGNED_URL_SECONDS,
-              ),
-            ),
+          // Thumbnails are asked for alongside their files; a missing one just comes back without a link.
+          const byPath = await cachedSignedUrls(
+            [...stored, ...stored.filter((i) => i.thumb).map((i) => ({ path: thumbPath(i.path), version: i.version }))],
+            async (paths) =>
+              need(check(await supabase.storage.from(PHOTO_BUCKET).createSignedUrls(paths, SIGNED_URL_SECONDS))),
+            { lifetimeMs: SIGNED_URL_SECONDS * 1000, minRemainingMs: SIGNED_URL_MIN_REMAINING_SECONDS * 1000 },
           );
-          const byPath = new Map(signed.map((s) => [s.path, s.signedUrl]));
-          for (const { id, path } of stored) {
+          for (const { id, path, thumb } of stored) {
             const url = byPath.get(path);
-            if (url) images[id] = url;
+            if (!url) continue;
+            images[id] = url;
+            if (!thumb) continue;
+            const thumbUrl = byPath.get(thumbPath(path));
+            if (thumbUrl) thumbs[url] = thumbUrl;
+            else missingThumbs.push({ path, url });
           }
         }
       }
@@ -336,6 +385,8 @@ export function createSupabaseInventory(supabase: Client) {
         threshold: s.low_stock_threshold,
         catalogues: need(check(catalogues)).map(catalogueFromRow),
         images,
+        thumbs,
+        missingThumbs,
       };
     },
 
@@ -443,7 +494,7 @@ export function createSupabaseInventory(supabase: Client) {
     async uploadPhoto(productId: string, photo: Photo, dataUrl: string, sortOrder: number) {
       const blob = await (await fetch(dataUrl)).blob();
       const path = photoPath(productId, photo.id);
-      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: true }));
+      await putPhotoFile(path, blob, "image/jpeg");
       check(
         await supabase.from("product_images").insert({
           id: photo.id,
@@ -460,14 +511,14 @@ export function createSupabaseInventory(supabase: Client) {
     async replacePhotoFile(productId: string, photoId: string, dataUrl: string) {
       const blob = await (await fetch(dataUrl)).blob();
       const path = photoPath(productId, photoId);
-      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: true }));
+      await putPhotoFile(path, blob, "image/jpeg");
       check(await supabase.from("product_images").update({ file_size: blob.size }).eq("id", photoId));
     },
     /** Store a background-removed copy beside the original (never replacing it). */
     async saveCutout(productId: string, photoId: string, dataUrl: string, shown: boolean) {
       const blob = await (await fetch(dataUrl)).blob();
       const path = cutoutPath(productId, photoId);
-      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/png", upsert: true }));
+      await putPhotoFile(path, blob, "image/png");
       check(await supabase.from("product_images").update({ cutout_path: path, show_cutout: shown }).eq("id", photoId));
     },
     /**
@@ -478,9 +529,8 @@ export function createSupabaseInventory(supabase: Client) {
     async saveRefinement(productId: string, photoId: string, refinedDataUrl: string, maskDataUrl: string) {
       const [refined, mask] = await Promise.all([refinedDataUrl, maskDataUrl].map(async (url) => (await fetch(url)).blob()));
       const paths = { refined: refinedPath(productId, photoId), mask: maskPath(productId, photoId) };
-      const bucket = supabase.storage.from(PHOTO_BUCKET);
-      check(await bucket.upload(paths.mask, mask, { contentType: "image/png", upsert: true }));
-      check(await bucket.upload(paths.refined, refined, { contentType: "image/png", upsert: true }));
+      check(await upload(paths.mask, mask, "image/png"));
+      await putPhotoFile(paths.refined, refined, "image/png");
       check(
         await supabase
           .from("product_images")
@@ -498,7 +548,11 @@ export function createSupabaseInventory(supabase: Client) {
       );
       await supabase.storage
         .from(PHOTO_BUCKET)
-        .remove([refinedPath(productId, photoId), maskPath(productId, photoId), enhancedPath(productId, photoId, "refined")]);
+        .remove([
+          ...withThumb(refinedPath(productId, photoId)),
+          maskPath(productId, photoId),
+          ...withThumb(enhancedPath(productId, photoId, "refined")),
+        ]);
     },
     /** Switching between original and background-removed starts unenhanced (enhancing is always asked for). */
     async setCutoutShown(photoId: string, shown: boolean) {
@@ -509,12 +563,29 @@ export function createSupabaseInventory(supabase: Client) {
       const blob = await (await fetch(dataUrl)).blob();
       const path = enhancedPath(productId, photoId, version);
       const contentType = version === "original" ? "image/jpeg" : "image/png";
-      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType, upsert: true }));
+      await putPhotoFile(path, blob, contentType);
       check(await supabase.from("product_images").update(enhancedColumn(version, path)).eq("id", photoId));
     },
     async clearEnhanced(productId: string, photoId: string, version: PhotoVersion) {
       check(await supabase.from("product_images").update(enhancedColumn(version, null)).eq("id", photoId));
-      await supabase.storage.from(PHOTO_BUCKET).remove([enhancedPath(productId, photoId, version)]);
+      await supabase.storage.from(PHOTO_BUCKET).remove(withThumb(enhancedPath(productId, photoId, version)));
+    },
+    /**
+     * Make thumbnails for files stored before thumbnails existed, a couple at a
+     * time. Never replaces a thumbnail written meanwhile (that one is newer).
+     * Best effort: failures are retried on a later load.
+     */
+    async backfillThumbnails(sources: ThumbSource[]) {
+      await mapLimit(sources, 2, async ({ path, url }) => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const thumb = await makeThumbnail(await res.blob());
+          await upload(thumbPath(path), thumb, thumb.type, false);
+        } catch {
+          // Try again next time.
+        }
+      });
     },
     async setEnhancedShown(photoId: string, shown: boolean) {
       check(await supabase.from("product_images").update({ show_enhanced: shown }).eq("id", photoId));

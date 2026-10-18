@@ -77,6 +77,8 @@ export type InventoryState = {
    * `enhancedKey(id, version)`.
    */
   images: Record<string, string>;
+  /** Full file URL (a value of `images`) → its small copy, for lists. Use with `thumbSrc`. */
+  thumbs: Record<string, string>;
   /** Photos currently being processed for colour detection. */
   busy: number;
   /** Photo ids whose background is being removed. */
@@ -204,6 +206,8 @@ const DEMO_COALESCE_MS = 15_000;
 const TYPING_DEBOUNCE_MS = 700;
 /** Removals that offer Undo are saved after the toast has had time to be used. */
 const UNDO_WINDOW_MS = 6_500;
+/** Older photos' thumbnails are made after the page's own photos have had time to load. */
+const THUMB_BACKFILL_DELAY_MS = 5_000;
 const MAX_MOVEMENTS = 2000;
 
 function blankProduct(sizes: string[]): Product {
@@ -225,6 +229,7 @@ function blankProduct(sizes: string[]): Product {
 export function createInventoryStore({ mode, backend, onError }: InventoryStoreOptions) {
   const sync = mode === "supabase" ? backend : undefined;
   const demo = mode === "demo";
+  let backfillStarted = false;
 
   return createStore<InventoryStore>()(
     persist(
@@ -366,11 +371,12 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           ironPending: {},
           catalogues: [],
           activeCatalogueId: null,
+          thumbs: {},
 
           load: async () => {
             if (!sync) return;
             try {
-              const snapshot = await sync.load();
+              const { missingThumbs, ...snapshot } = await sync.load();
               set((s) => ({
                 ...snapshot,
                 // Keep local previews of photos still uploading.
@@ -378,6 +384,11 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
                 ready: true,
                 loadError: null,
               }));
+              // Older photos get thumbnails once, in the background, after the page has loaded its photos.
+              if (missingThumbs.length && !backfillStarted) {
+                backfillStarted = true;
+                setTimeout(() => void sync.backfillThumbnails(missingThumbs), THUMB_BACKFILL_DELAY_MS);
+              }
             } catch (error) {
               set({ ready: true, loadError: error instanceof Error ? error.message : "Couldn't load the inventory." });
             }
@@ -628,6 +639,10 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
             const product = findProduct(productId);
             const photo = product?.photos.find((ph) => ph.id === photoId);
             if (!product || !photo) return;
+            const previous = product.variants.find((v) => v.id === photo.variantId);
+            const othersInPrevious = product.photos.some((ph) => ph.id !== photoId && ph.variantId === photo.variantId);
+            // Already there, or already alone in its own row: nothing to do.
+            if (variantId === photo.variantId || (variantId === "own" && previous && !othersInPrevious)) return;
             let created: Variant | null = null;
             let target = variantId;
             if (target === "own") {
@@ -635,14 +650,18 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
               target = created.id;
             }
             const assigned = target;
+            // The row left behind goes too when it has no photos and no stock, as when its last photo is removed.
+            const dropVariant = previous && !othersInPrevious && variantUnits(product, previous) === 0 ? previous : undefined;
             edit(productId, (p) => ({
               ...p,
-              variants: created ? [...p.variants, created] : p.variants,
+              variants: [...p.variants, ...(created ? [created] : [])].filter((v) => v.id !== dropVariant?.id),
               photos: p.photos.map((ph) => (ph.id === photoId ? { ...ph, variantId: assigned } : ph)),
             }));
+            if (dropVariant) flushKey(`variant:${dropVariant.id}:${productId}`);
             enqueue(productId, async () => {
               if (created) await sync!.insertVariant(productId, created, product.variants.length);
               await sync!.assignPhoto(photoId, assigned);
+              if (dropVariant) await sync!.removeVariant(dropVariant.id, undefined);
             });
           },
           makeCover: (productId, photoId) => {
