@@ -55,7 +55,7 @@ function loadFontBytes() {
       return [name, bytes] as const;
     }),
   )
-    .then((entries) => Object.fromEntries(entries) as Record<FontName, Uint8Array>)
+    .then((entries) => Object.fromEntries(entries) as unknown as Record<FontName, Uint8Array>)
     .catch((error) => {
       fontBytes = null; // retry next time
       throw error;
