@@ -141,7 +141,7 @@ export function createServerPhotoRenderer() {
     }
 
     // Keep alpha where the original was a cutout or the theme clips the photo.
-    const transparent = !!shape || (!!ref.imageUrl && !ref.backdrop);
+    const transparent = !!shape || (!!ref.imageUrl && !ref.backdrop && sourceHasAlpha);
     if (transparent) return { bytes: rendered, type: "image/png" };
     return { bytes: await sharp(rendered).jpeg({ quality: Math.round((quality ?? 0.86) * 100) }).toBuffer(), type: "image/jpeg" };
   };
