@@ -16,6 +16,7 @@ import { formatMoney, formatPercent } from "@/lib/inventory/format";
 import { suggestSku } from "@/lib/inventory/sku";
 import { margin } from "@/lib/inventory/stock";
 import { CATEGORIES, type Product } from "@/lib/inventory/types";
+import { normalizeWhatsappCatalogUrl } from "@/lib/inventory/whatsapp";
 import { cn } from "@/lib/utils";
 import { useAccess, useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 import { useDropTarget, usePhotoUpload } from "@/providers/photo-upload-provider";
@@ -230,7 +231,58 @@ function DetailsSection({ product }: { product: Product }) {
           </span>
         </label>
       </div>
+      <WhatsappCatalogUrlField key={product.id} product={product} />
     </section>
+  );
+}
+
+/** Saved on blur, once the link is valid (or cleared), so a half-typed link is never sent. */
+function WhatsappCatalogUrlField({ product }: { product: Product }) {
+  const updateProduct = useInventory((s) => s.updateProduct);
+  const saved = product.whatsappCatalogUrl ?? "";
+  const [draft, setDraft] = useState(saved);
+  const [lastSaved, setLastSaved] = useState(saved);
+  const [invalid, setInvalid] = useState(false);
+  if (saved !== lastSaved) {
+    // Changed elsewhere (e.g. Undo): show the stored link.
+    setLastSaved(saved);
+    setDraft(saved);
+    setInvalid(false);
+  }
+  const errorId = `whatsapp-url-error-${product.id}`;
+
+  const commit = () => {
+    const url = normalizeWhatsappCatalogUrl(draft);
+    if (url === null) return setInvalid(true);
+    setInvalid(false);
+    setDraft(url);
+    if (url !== saved) updateProduct(product.id, { whatsappCatalogUrl: url });
+  };
+
+  return (
+    <label className={fieldLabel}>
+      WhatsApp catalogue URL
+      <input
+        type="url"
+        inputMode="url"
+        value={draft}
+        onChange={(e) => {
+          setDraft(e.target.value);
+          if (invalid) setInvalid(false);
+        }}
+        onBlur={commit}
+        onKeyDown={(e) => e.key === "Enter" && commit()}
+        placeholder="https://wa.me/p/…"
+        aria-invalid={invalid}
+        aria-describedby={invalid ? errorId : undefined}
+        className={cn(fieldInput, invalid && "border-destructive focus:border-destructive")}
+      />
+      {invalid && (
+        <span id={errorId} className="text-destructive">
+          Paste a WhatsApp catalogue item link, like https://wa.me/p/1234567890/263771234567.
+        </span>
+      )}
+    </label>
   );
 }
 

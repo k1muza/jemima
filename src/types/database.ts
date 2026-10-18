@@ -26,6 +26,7 @@ export type Database = {
           show_cover: boolean;
           show_prices: boolean;
           subtitle: string;
+          theme: string;
           title: string;
           updated_at: string;
           updated_by: string | null;
@@ -45,6 +46,7 @@ export type Database = {
           show_cover?: boolean;
           show_prices?: boolean;
           subtitle?: string;
+          theme?: string;
           title?: string;
           updated_at?: string;
           updated_by?: string | null;
@@ -63,6 +65,7 @@ export type Database = {
           show_cover?: boolean;
           show_prices?: boolean;
           subtitle?: string;
+          theme?: string;
           title?: string;
           updated_at?: string;
           updated_by?: string | null;
@@ -154,12 +157,20 @@ export type Database = {
       product_images: {
         Row: {
           created_at: string;
+          cutout_enhanced_path: string | null;
+          cutout_path: string | null;
           detected_hex: string | null;
+          enhanced_path: string | null;
           file_size: number | null;
           height: number | null;
           id: string;
+          mask_path: string | null;
           mime_type: string | null;
           product_id: string;
+          refined_enhanced_path: string | null;
+          refined_path: string | null;
+          show_cutout: boolean;
+          show_enhanced: boolean;
           sort_order: number;
           storage_path: string;
           uploaded_by: string | null;
@@ -169,12 +180,20 @@ export type Database = {
         ComputedFields: never;
         Insert: {
           created_at?: string;
+          cutout_enhanced_path?: string | null;
+          cutout_path?: string | null;
           detected_hex?: string | null;
+          enhanced_path?: string | null;
           file_size?: number | null;
           height?: number | null;
           id?: string;
+          mask_path?: string | null;
           mime_type?: string | null;
           product_id: string;
+          refined_enhanced_path?: string | null;
+          refined_path?: string | null;
+          show_cutout?: boolean;
+          show_enhanced?: boolean;
           sort_order?: number;
           storage_path: string;
           uploaded_by?: string | null;
@@ -183,12 +202,20 @@ export type Database = {
         };
         Update: {
           created_at?: string;
+          cutout_enhanced_path?: string | null;
+          cutout_path?: string | null;
           detected_hex?: string | null;
+          enhanced_path?: string | null;
           file_size?: number | null;
           height?: number | null;
           id?: string;
+          mask_path?: string | null;
           mime_type?: string | null;
           product_id?: string;
+          refined_enhanced_path?: string | null;
+          refined_path?: string | null;
+          show_cutout?: boolean;
+          show_enhanced?: boolean;
           sort_order?: number;
           storage_path?: string;
           uploaded_by?: string | null;
@@ -325,6 +352,7 @@ export type Database = {
           type: string;
           updated_at: string;
           updated_by: string | null;
+          whatsapp_catalog_url: string | null;
         };
         ComputedFields: never;
         Insert: {
@@ -342,6 +370,7 @@ export type Database = {
           type?: string;
           updated_at?: string;
           updated_by?: string | null;
+          whatsapp_catalog_url?: string | null;
         };
         Update: {
           category?: Database["public"]["Enums"]["product_category"];
@@ -358,6 +387,7 @@ export type Database = {
           type?: string;
           updated_at?: string;
           updated_by?: string | null;
+          whatsapp_catalog_url?: string | null;
         };
         Relationships: [];
       };

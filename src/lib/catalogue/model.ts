@@ -1,9 +1,14 @@
+import { photoSrc } from "@/lib/inventory/cutout";
 import { formatMoney } from "@/lib/inventory/format";
 import { productUnits, variantUnits } from "@/lib/inventory/stock";
-import type { Catalogue, Product } from "@/lib/inventory/types";
+import type { Catalogue, CatalogueTheme, Product } from "@/lib/inventory/types";
 
-/** A photo, or the product colour when there's no photo (drawn as a striped placeholder). */
-export type PhotoRef = { hex: string; imageUrl?: string };
+/**
+ * A photo, or the product colour when there's no photo (drawn as a striped
+ * placeholder). `backdrop` fills behind a transparent (background-removed)
+ * photo; without one the photo stays see-through.
+ */
+export type PhotoRef = { hex: string; imageUrl?: string; backdrop?: string };
 
 /** One product as it appears in a catalogue. */
 export type CatalogueItem = {
@@ -22,8 +27,50 @@ export type CataloguePage =
   | { kind: "grid"; items: CatalogueItem[]; number: number }
   | { kind: "feature"; item: CatalogueItem; number: number };
 
-export const GRID_PER_PAGE = 6;
+/** The designs a catalogue can use. `swatch` colours the picker preview: page, ink, accent. */
+export const CATALOGUE_THEMES: {
+  value: CatalogueTheme;
+  label: string;
+  description: string;
+  /** Products on a grid page. */
+  perPage: number;
+  swatch: { page: string; ink: string; accent: string };
+}[] = [
+  {
+    value: "Classic",
+    label: "Classic",
+    description: "Dark cover, warm paper, italic serif titles.",
+    perPage: 6,
+    swatch: { page: "#fffdf9", ink: "#1a1714", accent: "#1a1714" },
+  },
+  {
+    value: "Atelier",
+    label: "Atelier",
+    description: "Crisp white and lots of space. Small capitals, numbered pieces.",
+    perPage: 6,
+    swatch: { page: "#ffffff", ink: "#111111", accent: "#d8d8d8" },
+  },
+  {
+    value: "Lookbook",
+    label: "Lookbook",
+    description: "Magazine style. Full-bleed photos, four large pieces a page.",
+    perPage: 4,
+    swatch: { page: "#f4f1eb", ink: "#151412", accent: "#151412" },
+  },
+  {
+    value: "Boutique",
+    label: "Boutique",
+    description: "Warm blush and terracotta, arched photo frames.",
+    perPage: 6,
+    swatch: { page: "#f6ebe3", ink: "#3b2320", accent: "#b4553d" },
+  },
+];
+
+export const themeInfo = (theme: CatalogueTheme) => CATALOGUE_THEMES.find((t) => t.value === theme) ?? CATALOGUE_THEMES[0];
 const PLACEHOLDER_HEX = "#d9d1c4";
+/** Every other product's photos sit on black; the rest stay transparent. */
+export const PHOTO_BACKDROP = "#000000";
+export const backdropFor = (index: number) => (index % 2 === 0 ? PHOTO_BACKDROP : undefined);
 /** Cover background when the catalogue has no products. */
 export const EMPTY_COVER_HEX = "#2b2621";
 
@@ -40,6 +87,7 @@ export function newCatalogue(id: string, overrides: Partial<Catalogue> = {}): Ca
     title: seasonTitle(),
     subtitle: "New pieces for the season",
     layout: "Grid",
+    theme: "Classic",
     cover: true,
     showPrices: true,
     showColours: true,
@@ -88,11 +136,11 @@ export function colourOptions(products: Product[], limit = 14) {
     .map(([key, { name, hex }]) => ({ key, name, hex }));
 }
 
-function photoRef(product: Product, index: number, images: Record<string, string>): PhotoRef | null {
+function photoRef(product: Product, index: number, images: Record<string, string>, backdrop?: string): PhotoRef | null {
   const photo = product.photos[index];
   if (!photo) return null;
   const variant = product.variants.find((v) => v.id === photo.variantId);
-  return { hex: variant?.colourHex ?? photo.hex ?? PLACEHOLDER_HEX, imageUrl: images[photo.id] };
+  return { hex: variant?.colourHex ?? photo.hex ?? PLACEHOLDER_HEX, imageUrl: photoSrc(images, photo), backdrop };
 }
 
 /** The products a catalogue prints, in product-list order. */
@@ -100,7 +148,8 @@ export function catalogueItems(catalogue: Catalogue, products: Product[], images
   const ids = new Set(selectedIds(catalogue, products));
   return products
     .filter((p) => ids.has(p.id) && (!catalogue.hideSoldOut || productUnits(p) > 0))
-    .map((p) => {
+    .map((p, index) => {
+      const backdrop = backdropFor(index);
       const variants = catalogue.hideSoldOut ? p.variants.filter((v) => variantUnits(p, v) > 0) : p.variants;
       const seen = new Set<string>();
       const colours = variants
@@ -117,8 +166,8 @@ export function catalogueItems(catalogue: Catalogue, products: Product[], images
         type: p.type || p.category,
         price: p.priceCents ? formatMoney(p.priceCents) : "",
         colours,
-        cover: photoRef(p, 0, images) ?? { hex: p.variants[0]?.colourHex ?? PLACEHOLDER_HEX },
-        thumbs: [photoRef(p, 1, images), photoRef(p, 2, images)].filter((x): x is PhotoRef => !!x),
+        cover: photoRef(p, 0, images, backdrop) ?? { hex: p.variants[0]?.colourHex ?? PLACEHOLDER_HEX },
+        thumbs: [photoRef(p, 1, images, backdrop), photoRef(p, 2, images, backdrop)].filter((x): x is PhotoRef => !!x),
       };
     });
 }
@@ -129,9 +178,10 @@ export function cataloguePages(catalogue: Catalogue, items: CatalogueItem[]): Ca
   if (catalogue.layout === "Feature") {
     return items.map((item, i) => ({ kind: "feature", item, number: first + i }));
   }
+  const perPage = themeInfo(catalogue.theme).perPage;
   const pages: CataloguePage[] = [];
-  for (let i = 0; i < items.length; i += GRID_PER_PAGE) {
-    pages.push({ kind: "grid", items: items.slice(i, i + GRID_PER_PAGE), number: first + pages.length });
+  for (let i = 0; i < items.length; i += perPage) {
+    pages.push({ kind: "grid", items: items.slice(i, i + perPage), number: first + pages.length });
   }
   return pages;
 }

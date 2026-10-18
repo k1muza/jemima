@@ -69,6 +69,35 @@ export function useCatalogueExport(catalogue: Catalogue | undefined) {
     if (file) setPreview({ ...file, url: URL.createObjectURL(file.blob) });
   };
 
+  /**
+   * The PDF opens in a new tab. The tab is opened straight away, while the click still
+   * counts as the user's, since pop-up blockers stop tabs opened after the PDF is built.
+   */
+  const openPdfTab = async () => {
+    if (!catalogue || busy) return;
+    const tab = window.open("", "_blank");
+    if (tab) {
+      tab.document.title = "Making the PDF…";
+      tab.document.body.style.cssText = "margin:0;padding:32px;font:14px system-ui,sans-serif;color:#6b645c";
+      tab.document.body.textContent = "Making the PDF…";
+    }
+    const file = await build("pdf");
+    if (!file) {
+      tab?.close();
+      return;
+    }
+    const url = URL.createObjectURL(file.blob);
+    if (!tab) {
+      // Pop-ups blocked: show it here instead.
+      setPreview({ ...file, url });
+    } else if (tab.closed) {
+      URL.revokeObjectURL(url);
+    } else {
+      // The tab keeps the object URL; it's freed when this page closes.
+      tab.location.href = url;
+    }
+  };
+
   const download = async (kind: ExportKind) => {
     const file = await build(kind);
     if (file) downloadBlob(file.filename, file.blob);
@@ -77,7 +106,7 @@ export function useCatalogueExport(catalogue: Catalogue | undefined) {
   return {
     busy,
     preview,
-    previewPdf: () => open("pdf"),
+    previewPdf: openPdfTab,
     previewWeb: () => open("web"),
     downloadWeb: () => download("web"),
     closePreview: () => setPreview(null),

@@ -6,6 +6,7 @@ import { toast } from "sonner";
 
 import type { NameSuggestion } from "@/lib/gemini";
 import { processPhoto } from "@/lib/inventory/colour";
+import { toDataUrl } from "@/lib/inventory/cutout";
 import { plural } from "@/lib/inventory/format";
 
 import { useInventory, useInventoryApi } from "./inventory-store-provider";
@@ -86,7 +87,7 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
 
       try {
         // Saved Supabase products use signed URLs, while the API accepts image data.
-        const dataUrl = image.startsWith("data:") ? image : await imageUrlToDataUrl(image);
+        const dataUrl = await toDataUrl(image);
         const res = await fetch("/api/product-name", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -207,23 +208,6 @@ export function PhotoUploadProvider({ children }: { children: ReactNode }) {
       )}
     </PhotoUploadContext>
   );
-}
-
-function imageUrlToDataUrl(url: string) {
-  return fetch(url)
-    .then((res) => {
-      if (!res.ok) throw new Error("Could not load product photo");
-      return res.blob();
-    })
-    .then(
-      (blob) =>
-        new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(blob);
-        }),
-    );
 }
 
 export function usePhotoUpload() {

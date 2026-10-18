@@ -115,8 +115,11 @@ export async function processPhoto(file: File) {
   return { dataUrl: canvas.toDataURL("image/jpeg", 0.85), hex: dominantColour(img) };
 }
 
-/** Rotate a stored photo a quarter turn clockwise; returns the new JPEG data URL. */
-export async function rotatePhoto(src: string) {
+/**
+ * Rotate a stored photo a quarter turn clockwise; returns the new data URL.
+ * JPEG by default; "image/png" keeps the transparency of background-removed copies.
+ */
+export async function rotatePhoto(src: string, type: "image/jpeg" | "image/png" = "image/jpeg") {
   const img = await loadImage(await (await fetch(src)).blob());
   const canvas = document.createElement("canvas");
   canvas.width = img.height;
@@ -125,7 +128,7 @@ export async function rotatePhoto(src: string) {
   ctx.translate(canvas.width, 0);
   ctx.rotate(Math.PI / 2);
   ctx.drawImage(img, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.92);
+  return canvas.toDataURL(type, 0.92);
 }
 
 /**

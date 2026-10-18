@@ -31,7 +31,7 @@ The database only answers signed-in staff, so switching sign-in off always means
 
 ### Data model (supabase/migrations)
 
-`products` → `product_variants` (colour + style) × `product_sizes` → `inventory_skus` (quantity per variant + size). `product_costs` holds unit cost separately so it can be hidden. `product_images` rows point at files in the private `product-images` bucket (shown via signed URLs). `stock_movements` is the append-only history: quantities change only through the `adjust_stock()` function, which updates the SKU and records the movement in one transaction, rejects negative stock, ignores retried requests, and rejects stale edits. Removing a size or colour with stock records the write-off; deleting a product with history archives it instead. Money is integer cents (USD).
+`products` → `product_variants` (colour + style) × `product_sizes` → `inventory_skus` (quantity per variant + size). `product_costs` holds unit cost separately so it can be hidden. `product_images` rows point at files in the private `product-images` bucket (shown via signed URLs). `stock_movements` is the append-only history: quantities change only through the `adjust_stock()` function, which updates the SKU and records the movement in one transaction, rejects negative stock, ignores retried requests, and rejects stale edits. A photo can also have a background-removed copy (`cutout_path`, a PNG beside the original — which is never overwritten); `show_cutout` says which version is displayed. A cutout can be refined by hand: `mask_path` is a PNG of what was erased (the cutout stays the untouched base) and `refined_path` the result that is shown. A product can link to its WhatsApp Business catalogue item (`whatsapp_catalog_url`, optional); the database only accepts the canonical `https://wa.me/p/<product id>/<phone number>` form. Removing a size or colour with stock records the write-off; deleting a product with history archives it instead. Money is integer cents (USD).
 
 ### Database changes (hosted Supabase)
 
@@ -59,6 +59,7 @@ npm run db:types:local  # regenerates src/types/database.ts from the local schem
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
    - `AUTH_ENABLED` — optional; `false` turns sign-in off (the site becomes public)
+   - `GEMINI_API_KEY` and `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` — optional; name suggestions and background removal
    - `NEXT_PUBLIC_SITE_URL` — your production URL, e.g. `https://jemimas-designs.vercel.app` (optional fallback; auth emails use the request origin)
 
    Do **not** add `SUPABASE_DB_URL`; it is only for running migrations from your machine.
@@ -77,6 +78,7 @@ For a hosted project, set the Auth **Site URL** and add `<site>/auth/confirm` to
 | --- | --- |
 | `dev` / `build` / `start` | Next.js |
 | `lint` / `typecheck` | ESLint / `tsc --noEmit` |
+| `test` | Vitest |
 | `db:start` / `db:stop` / `db:reset` / `db:types` | Supabase CLI |
 
 ## Structure

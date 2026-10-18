@@ -17,9 +17,12 @@ export function Swatch({ hex, title, className }: { hex: string; title?: string;
   );
 }
 
-/** Photo, or a striped swatch-coloured placeholder when there's no image yet. */
-export function photoBackground(hex: string | undefined, imageUrl?: string): CSSProperties {
-  if (imageUrl) return { background: `center / cover no-repeat url("${imageUrl}")` };
+/**
+ * Photo, or a striped swatch-coloured placeholder when there's no image yet.
+ * `backdrop` shows through a transparent (background-removed) photo.
+ */
+export function photoBackground(hex: string | undefined, imageUrl?: string, backdrop?: string): CSSProperties {
+  if (imageUrl) return { background: `center / cover no-repeat url("${imageUrl}") ${backdrop ?? ""}`.trimEnd() };
   return {
     background: `repeating-linear-gradient(135deg, rgba(255,255,255,.07) 0 10px, rgba(0,0,0,0) 10px 20px), ${hex || "#d9d1c4"}`,
   };
@@ -31,19 +34,21 @@ export const placeholderInk = (hex: string | undefined) =>
 export function PhotoFill({
   hex,
   imageUrl,
+  backdrop,
   label,
   className,
   children,
 }: {
   hex?: string;
   imageUrl?: string;
+  backdrop?: string;
   /** Shown on the placeholder, e.g. "no photos yet". */
   label?: string;
   className?: string;
   children?: ReactNode;
 }) {
   return (
-    <div className={cn("relative overflow-hidden", className)} style={photoBackground(hex, imageUrl)}>
+    <div className={cn("relative overflow-hidden", className)} style={photoBackground(hex, imageUrl, backdrop)}>
       {!imageUrl && label && (
         <span
           className="absolute inset-0 flex items-center justify-center font-mono text-[11px]"

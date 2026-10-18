@@ -1,5 +1,6 @@
 import type { CatalogueFilter, CatalogueSort } from "@/stores/inventory-store";
 
+import { photoSrc } from "./cutout";
 import { productIssues, productStatus, productUnits } from "./stock";
 import type { Product } from "./types";
 
@@ -72,7 +73,7 @@ export function coverOf(product: Product, images: Record<string, string>) {
   const photo = product.photos[0];
   const variant = photo && product.variants.find((v) => v.id === photo.variantId);
   return {
-    imageUrl: photo ? images[photo.id] : undefined,
+    imageUrl: photo ? photoSrc(images, photo) : undefined,
     hex: variant?.colourHex ?? photo?.hex ?? product.variants[0]?.colourHex,
   };
 }

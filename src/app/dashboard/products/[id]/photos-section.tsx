@@ -1,7 +1,7 @@
 "use client";
 
 import { Dialog } from "@base-ui/react/dialog";
-import { ChevronLeft, ChevronRight, RotateCw, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, RotateCw, Scissors, SquarePen, Undo2, WandSparkles, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -15,11 +15,14 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { nameColour, rotatePhoto } from "@/lib/inventory/colour";
+import { cutoutKey, enhancedKey, maskKey, photoSrc, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
 import { plural } from "@/lib/inventory/format";
 import type { Photo, Product } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useInventory } from "@/providers/inventory-store-provider";
 import { usePhotoUpload } from "@/providers/photo-upload-provider";
+
+import { RefineEditor } from "./refine-editor";
 
 export function PhotosSection({ product }: { product: Product }) {
   const { pick, dragging } = usePhotoUpload();
@@ -67,7 +70,7 @@ function PhotoLightbox({
   const images = useInventory((s) => s.images);
   const photos = product.photos.filter((p) => images[p.id]);
   const index = photos.findIndex((p) => p.id === photoId);
-  const imageUrl = photoId ? images[photoId] : undefined;
+  const imageUrl = index >= 0 ? photoSrc(images, photos[index]) : undefined;
   const step = (delta: number) => {
     if (photos.length < 2 || index < 0) return;
     onChange(photos[(index + delta + photos.length) % photos.length].id);
@@ -129,9 +132,36 @@ function PhotoTile({
   isCover: boolean;
   onZoom: () => void;
 }) {
-  const imageUrl = useInventory((s) => s.images[photo.id]);
-  const { makeCover, removePhoto, assignPhoto, restoreProduct, replacePhotoImage } = useInventory((s) => s);
+  const original = useInventory((s) => s.images[photo.id]);
+  const cutout = useInventory((s) => s.images[cutoutKey(photo.id)]);
+  const refined = useInventory((s) => s.images[refinedKey(photo.id)]);
+  const mask = useInventory((s) => s.images[maskKey(photo.id)]);
+  const enhanced = {
+    original: useInventory((s) => s.images[enhancedKey(photo.id, "original")]),
+    cutout: useInventory((s) => s.images[enhancedKey(photo.id, "cutout")]),
+    refined: useInventory((s) => s.images[enhancedKey(photo.id, "refined")]),
+  };
+  const removingBackground = useInventory((s) => !!s.cutoutPending[photo.id]);
+  const enhancing = useInventory((s) => !!s.enhancePending[photo.id]);
+  const {
+    makeCover,
+    removePhoto,
+    assignPhoto,
+    restoreProduct,
+    replacePhotoImage,
+    removeBackground,
+    restoreOriginal,
+    enhance,
+    setEnhanced,
+  } = useInventory((s) => s);
   const [rotating, setRotating] = useState(false);
+  const [refining, setRefining] = useState(false);
+  /** An enhance (true) or undo (false) not yet saved; null when nothing is pending. */
+  const [draft, setDraft] = useState<boolean | null>(null);
+  const showingCutout = !!(photo.showCutout && cutout);
+  const version: PhotoVersion = showingCutout ? (photo.refined && refined ? "refined" : "cutout") : "original";
+  const showingEnhanced = !!((draft ?? photo.enhanced) && enhanced[version]);
+  const imageUrl = showingEnhanced ? enhanced[version] : showingCutout ? (photo.refined && refined) || cutout : original;
   const variant = product.variants.find((v) => v.id === photo.variantId);
   const hex = variant?.colourHex ?? photo.hex;
   const variantLabel = (v: { colourName: string; style: string }) => v.colourName + (v.style ? ` · ${v.style}` : "");
@@ -143,10 +173,26 @@ function PhotoTile({
   };
 
   const rotate = async () => {
-    if (!imageUrl || rotating) return;
+    if (!original || rotating) return;
     setRotating(true);
     try {
-      replacePhotoImage(product.id, photo.id, await rotatePhoto(imageUrl));
+      // Turn every version, so the background-removed copy never needs processing again.
+      const png = (url: string | undefined, keep: boolean | undefined) => (keep && url ? rotatePhoto(url, "image/png") : undefined);
+      const [rotated, rotatedCutout, rotatedRefined, rotatedMask, enhancedOriginal, enhancedCutout, enhancedRefined] = await Promise.all([
+        rotatePhoto(original),
+        png(cutout, photo.hasCutout),
+        png(refined, photo.refined && !!mask),
+        png(mask, photo.refined && !!refined),
+        enhanced.original && rotatePhoto(enhanced.original),
+        png(enhanced.cutout, photo.hasCutout),
+        png(enhanced.refined, photo.refined && !!mask && !!refined),
+      ]);
+      replacePhotoImage(product.id, photo.id, rotated, {
+        cutout: rotatedCutout,
+        refined: rotatedRefined,
+        mask: rotatedMask,
+        enhanced: { original: enhancedOriginal, cutout: enhancedCutout, refined: enhancedRefined },
+      });
     } catch {
       toast.error("Couldn't rotate that photo.");
     } finally {
@@ -154,7 +200,26 @@ function PhotoTile({
     }
   };
 
+  const dropBackground = async () => {
+    const result = await removeBackground(product.id, photo.id);
+    if (!result.ok) toast.error(result.error, { action: { label: "Retry", onClick: dropBackground } });
+  };
+
+  // Enhance and Undo preview instantly (the enhanced copy is processed once, then reused); Save keeps the choice.
+  const choose = (on: boolean) => setDraft(on === !!photo.enhanced ? null : on);
+  const toggleEnhance = async () => {
+    if (showingEnhanced) return choose(false);
+    const result = await enhance(product.id, photo.id);
+    if (result.ok) choose(true);
+    else toast.error(result.error, { action: { label: "Retry", onClick: toggleEnhance } });
+  };
+  const saveEnhanced = () => {
+    if (draft !== null) setEnhanced(product.id, photo.id, draft);
+    setDraft(null);
+  };
+
   const chip = "rounded-full bg-card/92 text-[11px] font-medium transition-colors hover:bg-white";
+  const iconChip = cn(chip, "flex size-[26px] items-center justify-center disabled:opacity-60");
 
   return (
     <div className="relative flex min-w-0 flex-col gap-2">
@@ -177,10 +242,10 @@ function PhotoTile({
             <button
               type="button"
               onClick={rotate}
-              disabled={rotating}
+              disabled={rotating || removingBackground || enhancing || draft !== null}
               title="Rotate photo"
               aria-label="Rotate photo"
-              className={cn(chip, "flex size-[26px] items-center justify-center disabled:opacity-60")}
+              className={iconChip}
             >
               <RotateCw className={cn("size-3.5", rotating && "animate-spin")} />
             </button>
@@ -189,7 +254,69 @@ function PhotoTile({
             ×
           </button>
         </div>
+        {original && (
+          <div className="absolute right-1.5 bottom-1.5 flex gap-1">
+            <button
+              type="button"
+              onClick={toggleEnhance}
+              disabled={enhancing || removingBackground || rotating}
+              aria-busy={enhancing}
+              aria-pressed={showingEnhanced}
+              title={enhancing ? "Enhancing…" : showingEnhanced ? "Undo Enhance" : "Enhance Image"}
+              aria-label={showingEnhanced ? "Undo Enhance" : "Enhance Image"}
+              className={cn(iconChip, showingEnhanced && "bg-primary text-primary-foreground hover:bg-primary/85")}
+            >
+              {enhancing ? <LoaderCircle className="size-3.5 animate-spin" /> : <WandSparkles className="size-3.5" />}
+            </button>
+            {draft !== null ? (
+              <>
+                <button type="button" onClick={() => setDraft(null)} title="Cancel" aria-label="Cancel" className={iconChip}>
+                  <X className="size-3.5" />
+                </button>
+                <button type="button" onClick={saveEnhanced} title="Save" aria-label="Save" className={iconChip}>
+                  <Check className="size-3.5" />
+                </button>
+              </>
+            ) : showingCutout ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => setRefining(true)}
+                  disabled={rotating || enhancing}
+                  title="Refine Image"
+                  aria-label="Refine Image"
+                  className={iconChip}
+                >
+                  <SquarePen className="size-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => restoreOriginal(product.id, photo.id)}
+                  disabled={enhancing}
+                  title="Restore Original"
+                  aria-label="Restore Original"
+                  className={iconChip}
+                >
+                  <Undo2 className="size-3.5" />
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={dropBackground}
+                disabled={removingBackground || enhancing || rotating}
+                aria-busy={removingBackground}
+                title={removingBackground ? "Removing background…" : "Remove Background"}
+                aria-label="Remove Background"
+                className={iconChip}
+              >
+                {removingBackground ? <LoaderCircle className="size-3.5 animate-spin" /> : <Scissors className="size-3.5" />}
+              </button>
+            )}
+          </div>
+        )}
       </PhotoFill>
+      {refining && <RefineEditor productId={product.id} photo={photo} onClose={() => setRefining(false)} />}
 
       <DropdownMenu>
         <DropdownMenuTrigger

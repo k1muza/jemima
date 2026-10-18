@@ -5,20 +5,24 @@ import { useRouter } from "next/navigation";
 import { use, useMemo, useState, type ReactNode } from "react";
 
 import { ConfirmDialog } from "@/components/inventory/confirm-dialog";
-import { buttonStyles, PageHeader, Panel, PhotoFill, Segmented, Swatch } from "@/components/inventory/primitives";
+import { buttonStyles, PageHeader, Panel, PhotoFill, photoBackground, Segmented, Swatch } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import {
+  CATALOGUE_THEMES,
   catalogueItems,
   colourOptions,
+  coverPhoto,
   filterForEditor,
   pageCount,
   selectedIds,
+  themeInfo,
+  type PhotoRef,
 } from "@/lib/catalogue/model";
 import { coverOf } from "@/lib/inventory/catalogue";
 import { formatMoney, formatNumber, plural } from "@/lib/inventory/format";
 import { productUnits } from "@/lib/inventory/stock";
-import type { Catalogue, CataloguePageLayout, Category } from "@/lib/inventory/types";
+import type { Catalogue, CataloguePageLayout, CatalogueTheme, Category } from "@/lib/inventory/types";
 import { cn } from "@/lib/utils";
 import { useInventory, useInventoryHydrated } from "@/providers/inventory-store-provider";
 
@@ -71,6 +75,7 @@ function Editor({ catalogue }: { catalogue: Catalogue }) {
       <div className="grid grid-cols-[repeat(auto-fit,minmax(min(340px,100%),1fr))] items-start gap-4">
         <div className="flex flex-col gap-4">
           <DetailsPanel catalogue={catalogue} />
+          <DesignPanel catalogue={catalogue} cover={coverPhoto(items)} />
           <LayoutPanel catalogue={catalogue} />
         </div>
         <ProductsPanel catalogue={catalogue} />
@@ -232,8 +237,84 @@ function DetailsPanel({ catalogue }: { catalogue: Catalogue }) {
   );
 }
 
-const LAYOUTS: { value: CataloguePageLayout; label: string }[] = [
-  { value: "Grid", label: "Grid · 6 per page" },
+function DesignPanel({ catalogue, cover }: { catalogue: Catalogue; cover: PhotoRef }) {
+  const updateCatalogue = useInventory((s) => s.updateCatalogue);
+
+  return (
+    <Panel className="flex flex-col gap-3 p-5">
+      <PanelHeading>Design</PanelHeading>
+      <div role="radiogroup" aria-label="Design" className="grid grid-cols-4 gap-2.5">
+        {CATALOGUE_THEMES.map((theme) => {
+          const on = catalogue.theme === theme.value;
+          return (
+            <button
+              key={theme.value}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              onClick={() => updateCatalogue(catalogue.id, { theme: theme.value })}
+              className="group flex min-w-0 flex-col gap-1.5 text-left"
+            >
+              <span
+                className={cn(
+                  "block rounded-lg p-[3px] ring-1 transition-shadow",
+                  on ? "ring-2 ring-foreground" : "ring-border group-hover:ring-foreground/50",
+                )}
+              >
+                <ThemeThumb theme={theme.value} cover={cover} />
+              </span>
+              <span className={cn("truncate text-xs", on ? "font-medium text-foreground" : "text-muted-foreground")}>
+                {theme.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="text-[13px] leading-snug text-muted-foreground">{themeInfo(catalogue.theme).description}</p>
+    </Panel>
+  );
+}
+
+/** A tiny cover in each design, using the catalogue's own cover photo. */
+function ThemeThumb({ theme, cover }: { theme: CatalogueTheme; cover: PhotoRef }) {
+  const { page, ink, accent } = themeInfo(theme).swatch;
+  const photo = (backdrop?: string) => photoBackground(cover.hex, cover.imageUrl, cover.backdrop ?? backdrop);
+  const bar = "block h-[3px] rounded-full";
+  const frame = "relative flex aspect-3/4 overflow-hidden rounded-[5px]";
+
+  if (theme === "Atelier")
+    return (
+      <span className={cn(frame, "flex-col items-center gap-[5%] p-[10%]")} style={{ background: page }}>
+        <span className={cn(bar, "w-1/3 h-[2px]")} style={{ background: ink }} />
+        <span className="w-full flex-1" style={photo()} />
+        <span className={cn(bar, "w-3/4")} style={{ background: ink }} />
+        <span className={cn(bar, "w-full h-px")} style={{ background: accent }} />
+      </span>
+    );
+  if (theme === "Lookbook")
+    return (
+      <span className={cn(frame, "items-end p-[9%]")} style={photo(ink)}>
+        <span className="absolute inset-0 bg-linear-to-b from-transparent via-transparent to-black/75" />
+        <span className="relative font-serif text-[22px] leading-[0.8] text-white">Aa</span>
+      </span>
+    );
+  if (theme === "Boutique")
+    return (
+      <span className={cn(frame, "flex-col items-center gap-[6%] px-[18%] pt-[14%] pb-[9%]")} style={{ background: accent }}>
+        <span className="w-full flex-1 rounded-t-full" style={photo("#fcf6f1")} />
+        <span className="font-serif text-[15px] leading-none text-[#fbf1e8] italic">Aa</span>
+      </span>
+    );
+  return (
+    <span className={cn(frame, "flex-col gap-[6%] p-[10%]")} style={{ background: ink }}>
+      <span className="w-full flex-1" style={photo()} />
+      <span className="font-serif text-[18px] leading-none text-[#f2ede4] italic">Aa</span>
+    </span>
+  );
+}
+
+const layouts = (catalogue: Catalogue): { value: CataloguePageLayout; label: string }[] => [
+  { value: "Grid", label: `Grid · ${themeInfo(catalogue.theme).perPage} per page` },
   { value: "Feature", label: "One per page" },
 ];
 
@@ -252,7 +333,7 @@ function LayoutPanel({ catalogue }: { catalogue: Catalogue }) {
       <PanelHeading>Layout</PanelHeading>
       <Segmented
         label="Page layout"
-        options={LAYOUTS}
+        options={layouts(catalogue)}
         value={catalogue.layout}
         onChange={(layout) => updateCatalogue(catalogue.id, { layout })}
         itemClassName="flex-1 whitespace-nowrap"

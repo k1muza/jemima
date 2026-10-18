@@ -14,6 +14,7 @@ import {
   Swatch,
 } from "@/components/inventory/primitives";
 import { Skeleton } from "@/components/ui/skeleton";
+import { photoSrc } from "@/lib/inventory/cutout";
 import { formatMoney, formatNumber, formatPercent, plural } from "@/lib/inventory/format";
 import { cellLevel, lowCells, margin, productIssues, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
 import { CATEGORIES } from "@/lib/inventory/types";
@@ -110,7 +111,7 @@ function OverviewContent() {
           .filter((size) => qtyOf(v, size) <= threshold || kept.includes(`${p.id}|${v.id}|${size}`))
           .map((size) => {
             const photo = p.photos.find((ph) => ph.variantId === v.id) ?? p.photos[0];
-            return { key: `${p.id}|${v.id}|${size}`, product: p, variant: v, size, photoUrl: photo && images[photo.id] };
+            return { key: `${p.id}|${v.id}|${size}`, product: p, variant: v, size, photoUrl: photo && photoSrc(images, photo) };
           }),
       ),
     )

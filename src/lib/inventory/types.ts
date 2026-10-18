@@ -30,6 +30,14 @@ export type Photo = {
   variantId: string;
   /** Colour detected from this photo. */
   hex: string;
+  /** A background-removed copy is stored beside the original (see `cutout.ts`). */
+  hasCutout?: boolean;
+  /** Show the background-removed copy instead of the original. */
+  showCutout?: boolean;
+  /** The cutout was refined by hand: a refined image and its erase mask are stored too. */
+  refined?: boolean;
+  /** Show the enhanced copy of the current version (original, cutout or refined), when it exists. */
+  enhanced?: boolean;
 };
 
 export type Product = {
@@ -45,8 +53,13 @@ export type Product = {
   variants: Variant[];
   /** First photo is the cover. */
   photos: Photo[];
+  /** Canonical WhatsApp Business catalogue item link (see `whatsapp.ts`); absent or "" = none. */
+  whatsappCatalogUrl?: string;
   updatedAt: string;
 };
+
+/** The product fields edited in place. */
+export type ProductPatch = Partial<Pick<Product, "name" | "type" | "sku" | "costCents" | "priceCents" | "whatsappCatalogUrl">>;
 
 export type StockStatus = "In stock" | "Low stock" | "Out of stock";
 
@@ -84,6 +97,9 @@ export type StockMovement = {
 
 export type CataloguePageLayout = "Grid" | "Feature";
 
+/** The catalogue's visual design; see `CATALOGUE_THEMES`. */
+export type CatalogueTheme = "Classic" | "Atelier" | "Lookbook" | "Boutique";
+
 /** A customer-facing catalogue (PDF / web page) built from a selection of products. */
 export type Catalogue = {
   id: string;
@@ -93,6 +109,7 @@ export type Catalogue = {
   title: string;
   subtitle: string;
   layout: CataloguePageLayout;
+  theme: CatalogueTheme;
   cover: boolean;
   showPrices: boolean;
   showColours: boolean;

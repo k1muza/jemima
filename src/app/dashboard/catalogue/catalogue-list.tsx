@@ -74,7 +74,7 @@ function CatalogueCard({ catalogue }: { catalogue: Catalogue }) {
         <span className="truncate font-serif text-[22px] leading-tight">{catalogue.name || "Untitled catalogue"}</span>
         {catalogue.title && <span className="truncate text-[13px] text-muted-foreground">{catalogue.title}</span>}
         <span className="font-mono text-[11px] tracking-[0.06em] text-subtle uppercase">
-          {plural(items.length, "product")} · {plural(pageCount(catalogue, items), "page")}
+          {catalogue.theme} · {plural(items.length, "product")} · {plural(pageCount(catalogue, items), "page")}
         </span>
       </span>
     </Link>

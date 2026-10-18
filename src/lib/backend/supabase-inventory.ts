@@ -1,22 +1,33 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { cutoutKey, enhancedKey, maskKey, refinedKey, type PhotoVersion } from "@/lib/inventory/cutout";
 import { seedSettings } from "@/lib/inventory/seed";
 import type {
   Access,
   Catalogue,
   CataloguePageLayout,
+  CatalogueTheme,
   Category,
   ColourStatus,
   Photo,
   Product,
+  ProductPatch,
   ShopSettings,
   StaffMember,
   StockMovement,
   Variant,
 } from "@/lib/inventory/types";
+import { normalizeWhatsappCatalogUrl } from "@/lib/inventory/whatsapp";
 import type { Database } from "@/types/database";
 
 type Client = SupabaseClient<Database>;
+
+/** The stored column value: null for no link. The database rejects anything but the canonical form too. */
+function whatsappCatalogUrlColumn(value: string | undefined) {
+  const url = normalizeWhatsappCatalogUrl(value ?? "");
+  if (url === null) throw new Error("That isn't a WhatsApp catalogue item link (https://wa.me/p/…).");
+  return url || null;
+}
 
 export const PHOTO_BUCKET = "product-images";
 /** Signed photo links last long enough for a working day; reloading refreshes them. */
@@ -24,6 +35,28 @@ const SIGNED_URL_SECONDS = 60 * 60 * 12;
 const HISTORY_LIMIT = 1000;
 
 export const photoPath = (productId: string, photoId: string) => `${productId}/${photoId}.jpg`;
+export const cutoutPath = (productId: string, photoId: string) => `${productId}/${photoId}.cutout.png`;
+export const refinedPath = (productId: string, photoId: string) => `${productId}/${photoId}.refined.png`;
+export const maskPath = (productId: string, photoId: string) => `${productId}/${photoId}.mask.png`;
+/** The enhanced copy of a version: JPEG for the original, PNG (with transparency) otherwise. */
+export const enhancedPath = (productId: string, photoId: string, version: PhotoVersion) =>
+  version === "original" ? `${productId}/${photoId}.enhanced.jpg` : `${productId}/${photoId}.${version}.enhanced.png`;
+const ENHANCED_COLUMN = {
+  original: "enhanced_path",
+  cutout: "cutout_enhanced_path",
+  refined: "refined_enhanced_path",
+} as const satisfies Record<PhotoVersion, string>;
+const VERSIONS: PhotoVersion[] = ["original", "cutout", "refined"];
+const enhancedColumn = (version: PhotoVersion, path: string | null) =>
+  ({ [ENHANCED_COLUMN[version]]: path }) as Partial<Record<(typeof ENHANCED_COLUMN)[PhotoVersion], string | null>>;
+/** Every file of a photo (most may not exist; removing a missing file is harmless). */
+const photoFiles = (productId: string, photoId: string) => [
+  photoPath(productId, photoId),
+  cutoutPath(productId, photoId),
+  refinedPath(productId, photoId),
+  maskPath(productId, photoId),
+  ...VERSIONS.map((v) => enhancedPath(productId, photoId, v)),
+];
 
 export type InventorySnapshot = {
   access: Access;
@@ -33,7 +66,7 @@ export type InventorySnapshot = {
   settings: ShopSettings;
   threshold: number;
   catalogues: Catalogue[];
-  /** Photo id → signed URL. */
+  /** Photo id (or `cutoutKey(id)`, `refinedKey(id)`, `maskKey(id)`, `enhancedKey(id, version)`) → signed URL. */
   images: Record<string, string>;
 };
 
@@ -57,6 +90,7 @@ const catalogueFromRow = (row: CatalogueRow): Catalogue => ({
   title: row.title,
   subtitle: row.subtitle,
   layout: row.layout === "feature" ? "Feature" : "Grid",
+  theme: themeFromColumn(row.theme),
   cover: row.show_cover,
   showPrices: row.show_prices,
   showColours: row.show_colours,
@@ -68,6 +102,11 @@ const catalogueFromRow = (row: CatalogueRow): Catalogue => ({
 
 const layoutColumn = (layout: CataloguePageLayout) => (layout === "Feature" ? "feature" : "grid");
 
+const THEMES: CatalogueTheme[] = ["Classic", "Atelier", "Lookbook", "Boutique"];
+// Rows from before the theme column existed read as Classic.
+const themeFromColumn = (value: string | undefined) =>
+  THEMES.find((t) => t.toLowerCase() === value) ?? "Classic";
+
 /** Only the fields present in `c`, as column values. */
 function catalogueColumns(c: Partial<Omit<Catalogue, "id">>) {
   return {
@@ -75,6 +114,7 @@ function catalogueColumns(c: Partial<Omit<Catalogue, "id">>) {
     ...(c.title !== undefined && { title: c.title }),
     ...(c.subtitle !== undefined && { subtitle: c.subtitle }),
     ...(c.layout !== undefined && { layout: layoutColumn(c.layout) }),
+    ...(c.theme !== undefined && { theme: c.theme.toLowerCase() }),
     ...(c.cover !== undefined && { show_cover: c.cover }),
     ...(c.showPrices !== undefined && { show_prices: c.showPrices }),
     ...(c.showColours !== undefined && { show_colours: c.showColours }),
@@ -86,14 +126,14 @@ function catalogueColumns(c: Partial<Omit<Catalogue, "id">>) {
 }
 
 const PRODUCT_SELECT = `
-  id, name, category, type, sku, default_price_cents, updated_at,
+  id, name, category, type, sku, default_price_cents, whatsapp_catalog_url, updated_at,
   product_costs ( default_cost_cents ),
   product_sizes ( label, sort_order ),
   product_variants (
     id, colour_name, colour_hex, colour_status, style_label, sort_order, created_at,
     inventory_skus ( quantity_on_hand, product_sizes ( label ) )
   ),
-  product_images ( id, variant_id, detected_hex, sort_order, created_at, storage_path )
+  product_images ( id, variant_id, detected_hex, sort_order, created_at, storage_path, cutout_path, show_cutout, refined_path, mask_path, enhanced_path, cutout_enhanced_path, refined_enhanced_path, show_enhanced )
 ` as const;
 
 /** Data access for the inventory, via the browser client. Row-level security decides what each person can see and do. */
@@ -199,7 +239,22 @@ export function createSupabaseInventory(supabase: Client) {
           .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
           .map((img) => {
             imagePaths.push({ id: img.id, path: img.storage_path });
-            return { id: img.id, variantId: img.variant_id ?? variants[0]?.id ?? "", hex: img.detected_hex ?? "#9a948a" };
+            if (img.cutout_path) imagePaths.push({ id: cutoutKey(img.id), path: img.cutout_path });
+            if (img.refined_path && img.mask_path) {
+              imagePaths.push({ id: refinedKey(img.id), path: img.refined_path }, { id: maskKey(img.id), path: img.mask_path });
+            }
+            for (const v of VERSIONS) {
+              const path = img[ENHANCED_COLUMN[v]];
+              if (path) imagePaths.push({ id: enhancedKey(img.id, v), path });
+            }
+            return {
+              id: img.id,
+              variantId: img.variant_id ?? variants[0]?.id ?? "",
+              hex: img.detected_hex ?? "#9a948a",
+              ...(img.cutout_path && { hasCutout: true, showCutout: img.show_cutout }),
+              ...(img.cutout_path && img.refined_path && { refined: true }),
+              ...(img.show_enhanced && { enhanced: true }),
+            };
           });
         const cost = Array.isArray(row.product_costs) ? row.product_costs[0] : row.product_costs;
         return {
@@ -213,6 +268,7 @@ export function createSupabaseInventory(supabase: Client) {
           sizes,
           variants,
           photos,
+          ...(row.whatsapp_catalog_url && { whatsappCatalogUrl: row.whatsapp_catalog_url }),
           updatedAt: row.updated_at,
         };
       });
@@ -278,7 +334,14 @@ export function createSupabaseInventory(supabase: Client) {
 
     // ── Products ──
     async createProduct(product: Product) {
-      check(await supabase.from("products").insert({ id: product.id, name: product.name, category: product.category }));
+      check(
+        await supabase.from("products").insert({
+          id: product.id,
+          name: product.name,
+          category: product.category,
+          whatsapp_catalog_url: whatsappCatalogUrlColumn(product.whatsappCatalogUrl),
+        }),
+      );
       if (product.sizes.length) {
         check(
           await supabase
@@ -287,9 +350,13 @@ export function createSupabaseInventory(supabase: Client) {
         );
       }
     },
-    async updateProduct(id: string, patch: Partial<Pick<Product, "name" | "type" | "sku" | "priceCents" | "costCents">>) {
-      const { costCents, priceCents, ...fields } = patch;
-      const update = { ...fields, ...(priceCents !== undefined && { default_price_cents: priceCents }) };
+    async updateProduct(id: string, patch: ProductPatch) {
+      const { costCents, priceCents, whatsappCatalogUrl, ...fields } = patch;
+      const update = {
+        ...fields,
+        ...(priceCents !== undefined && { default_price_cents: priceCents }),
+        ...(whatsappCatalogUrl !== undefined && { whatsapp_catalog_url: whatsappCatalogUrlColumn(whatsappCatalogUrl) }),
+      };
       if (Object.keys(update).length) check(await supabase.from("products").update(update).eq("id", id));
       if (costCents !== undefined) {
         check(await supabase.from("product_costs").update({ default_cost_cents: costCents }).eq("product_id", id));
@@ -302,7 +369,7 @@ export function createSupabaseInventory(supabase: Client) {
     async deleteProduct(id: string, photoIds: string[]) {
       const outcome = check(await supabase.rpc("delete_or_archive_product", { p_product_id: id }));
       if (outcome === "deleted" && photoIds.length) {
-        await supabase.storage.from(PHOTO_BUCKET).remove(photoIds.map((ph) => photoPath(id, ph)));
+        await supabase.storage.from(PHOTO_BUCKET).remove(photoIds.flatMap((ph) => photoFiles(id, ph)));
       }
       return outcome as "deleted" | "archived";
     },
@@ -389,6 +456,62 @@ export function createSupabaseInventory(supabase: Client) {
       check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/jpeg", upsert: true }));
       check(await supabase.from("product_images").update({ file_size: blob.size }).eq("id", photoId));
     },
+    /** Store a background-removed copy beside the original (never replacing it). */
+    async saveCutout(productId: string, photoId: string, dataUrl: string, shown: boolean) {
+      const blob = await (await fetch(dataUrl)).blob();
+      const path = cutoutPath(productId, photoId);
+      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType: "image/png", upsert: true }));
+      check(await supabase.from("product_images").update({ cutout_path: path, show_cutout: shown }).eq("id", photoId));
+    },
+    /**
+     * Save a hand refinement of the cutout (which stays untouched as its base).
+     * Files first and the row last, so a failed save never points the photo at
+     * files that weren't written.
+     */
+    async saveRefinement(productId: string, photoId: string, refinedDataUrl: string, maskDataUrl: string) {
+      const [refined, mask] = await Promise.all([refinedDataUrl, maskDataUrl].map(async (url) => (await fetch(url)).blob()));
+      const paths = { refined: refinedPath(productId, photoId), mask: maskPath(productId, photoId) };
+      const bucket = supabase.storage.from(PHOTO_BUCKET);
+      check(await bucket.upload(paths.mask, mask, { contentType: "image/png", upsert: true }));
+      check(await bucket.upload(paths.refined, refined, { contentType: "image/png", upsert: true }));
+      check(
+        await supabase
+          .from("product_images")
+          .update({ refined_path: paths.refined, mask_path: paths.mask })
+          .eq("id", photoId),
+      );
+    },
+    /** Drop a refinement (and its enhanced copy), back to the plain cutout. */
+    async clearRefinement(productId: string, photoId: string) {
+      check(
+        await supabase
+          .from("product_images")
+          .update({ refined_path: null, mask_path: null, refined_enhanced_path: null })
+          .eq("id", photoId),
+      );
+      await supabase.storage
+        .from(PHOTO_BUCKET)
+        .remove([refinedPath(productId, photoId), maskPath(productId, photoId), enhancedPath(productId, photoId, "refined")]);
+    },
+    /** Switching between original and background-removed starts unenhanced (enhancing is always asked for). */
+    async setCutoutShown(photoId: string, shown: boolean) {
+      check(await supabase.from("product_images").update({ show_cutout: shown, show_enhanced: false }).eq("id", photoId));
+    },
+    /** Store the enhanced copy of one version beside it (the version itself is never replaced). */
+    async saveEnhanced(productId: string, photoId: string, version: PhotoVersion, dataUrl: string) {
+      const blob = await (await fetch(dataUrl)).blob();
+      const path = enhancedPath(productId, photoId, version);
+      const contentType = version === "original" ? "image/jpeg" : "image/png";
+      check(await supabase.storage.from(PHOTO_BUCKET).upload(path, blob, { contentType, upsert: true }));
+      check(await supabase.from("product_images").update(enhancedColumn(version, path)).eq("id", photoId));
+    },
+    async clearEnhanced(productId: string, photoId: string, version: PhotoVersion) {
+      check(await supabase.from("product_images").update(enhancedColumn(version, null)).eq("id", photoId));
+      await supabase.storage.from(PHOTO_BUCKET).remove([enhancedPath(productId, photoId, version)]);
+    },
+    async setEnhancedShown(photoId: string, shown: boolean) {
+      check(await supabase.from("product_images").update({ show_enhanced: shown }).eq("id", photoId));
+    },
     async assignPhoto(photoId: string, variantId: string) {
       check(await supabase.from("product_images").update({ variant_id: variantId }).eq("id", photoId));
     },
@@ -400,7 +523,7 @@ export function createSupabaseInventory(supabase: Client) {
     },
     async removePhoto(productId: string, photoId: string, dropVariantId?: string) {
       check(await supabase.from("product_images").delete().eq("id", photoId));
-      await supabase.storage.from(PHOTO_BUCKET).remove([photoPath(productId, photoId)]);
+      await supabase.storage.from(PHOTO_BUCKET).remove(photoFiles(productId, photoId));
       if (dropVariantId) check(await supabase.from("product_variants").delete().eq("id", dropVariantId));
     },
 

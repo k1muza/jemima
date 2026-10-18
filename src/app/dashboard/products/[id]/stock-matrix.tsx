@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { QtyInput } from "@/components/inventory/inputs";
 import { cellLevelClasses, cellLevelLabel, Panel, photoBackground, Swatch } from "@/components/inventory/primitives";
+import { photoSrc } from "@/lib/inventory/cutout";
 import { formatNumber } from "@/lib/inventory/format";
 import { nameColour } from "@/lib/inventory/colour";
 import { cellLevel, productUnits, qtyOf, sumOf, variantUnits } from "@/lib/inventory/stock";
@@ -94,7 +95,7 @@ export function StockMatrix({ product }: { product: Product }) {
               return (
                 <div key={v.id} role="row" className="grid items-center gap-1 border-b border-line-soft px-[18px] py-2" style={{ gridTemplateColumns: columns }}>
                   <div role="rowheader" className="sticky left-0 z-[1] bg-card flex min-w-0 items-center gap-2 self-stretch">
-                    <span className="h-[42px] w-[34px] shrink-0 overflow-hidden rounded-md" style={photoBackground(v.colourHex, photo && images[photo.id])} />
+                    <span className="h-[42px] w-[34px] shrink-0 overflow-hidden rounded-md" style={photoBackground(v.colourHex, photo && photoSrc(images, photo))} />
                     <label
                       title="Pick this colour"
                       className="relative flex size-6 shrink-0 cursor-pointer items-center justify-center rounded-md hover:bg-secondary focus-within:ring-2 focus-within:ring-ring"

@@ -4,7 +4,20 @@ import { createStore } from "zustand/vanilla";
 import type { SupabaseInventory } from "@/lib/backend/supabase-inventory";
 import { newCatalogue } from "@/lib/catalogue/model";
 import { attachPhoto, nameColour, newVariant } from "@/lib/inventory/colour";
+import {
+  currentVersion,
+  cutoutKey,
+  enhancedKey,
+  maskKey,
+  photoKeys,
+  refinedKey,
+  requestCutout,
+  requestEnhanced,
+  versionKey,
+  type PhotoVersion,
+} from "@/lib/inventory/cutout";
 import { photoDb } from "@/lib/inventory/photo-db";
+import { withAlphaOf } from "@/lib/inventory/pixels";
 import { seedMovements, seedProducts, seedSettings } from "@/lib/inventory/seed";
 import { isEmptyProduct, qtyOf, variantUnits } from "@/lib/inventory/stock";
 import {
@@ -14,7 +27,9 @@ import {
   type Catalogue,
   type Category,
   type MovementReason,
+  type Photo,
   type Product,
+  type ProductPatch,
   type ShopSettings,
   type StaffMember,
   type StockMovement,
@@ -26,6 +41,11 @@ export type CatalogueLayout = "Grid" | "List";
 export type CatalogueSort = "Newest" | "Name" | "Most units" | "Cost" | "Retail price" | "Last updated";
 
 export type AdjustResult = { ok: true; movement: StockMovement } | { ok: false; error: string };
+export type CutoutResult = { ok: true } | { ok: false; error: string };
+/** A hand refinement of a cutout, as PNG data URLs. */
+export type Refinement = { refined: string; mask: string };
+/** New bytes for a photo's other versions (e.g. after rotating it). */
+export type PhotoVersions = { cutout?: string; enhanced?: Partial<Record<PhotoVersion, string>> } & Partial<Refinement>;
 
 /** demo: seeded data kept in this browser. supabase: the shared database. */
 export type InventoryMode = "demo" | "supabase";
@@ -48,10 +68,18 @@ export type InventoryState = {
   settings: ShopSettings;
   /** Name recorded on stock movements (the signed-in user). */
   actor: string;
-  /** Photo id → displayable URL (data URL, or a signed Supabase Storage URL). */
+  /**
+   * Photo id → displayable URL (data URL, or a signed Supabase Storage URL). Also holds
+   * each photo's other versions under `cutoutKey(id)`, `refinedKey(id)`, `maskKey(id)` and
+   * `enhancedKey(id, version)`.
+   */
   images: Record<string, string>;
   /** Photos currently being processed for colour detection. */
   busy: number;
+  /** Photo ids whose background is being removed. */
+  cutoutPending: Record<string, true>;
+  /** Photo ids being enhanced. */
+  enhancePending: Record<string, true>;
   /** Customer-facing catalogues (PDF / web page), oldest first. */
   catalogues: Catalogue[];
   /** The catalogue open in the editor (falls back to the first). */
@@ -66,7 +94,7 @@ export type InventoryActions = {
   hasPending: () => boolean;
 
   createProduct: () => string;
-  updateProduct: (id: string, patch: Partial<Pick<Product, "name" | "type" | "sku" | "costCents" | "priceCents">>) => void;
+  updateProduct: (id: string, patch: ProductPatch) => void;
   setCategory: (id: string, category: Category) => void;
   deleteProduct: (id: string) => void;
   /** Put back a snapshot taken before an edit (for Undo). */
@@ -99,8 +127,29 @@ export type InventoryActions = {
   addPhoto: (productId: string, dataUrl: string, hex: string) => void;
   assignPhoto: (productId: string, photoId: string, variantId: string | "own") => void;
   makeCover: (productId: string, photoId: string) => void;
-  /** Swap in rotated image bytes for a photo. */
-  replacePhotoImage: (productId: string, photoId: string, dataUrl: string) => void;
+  /** Swap in rotated image bytes for a photo (and its other versions, if any). */
+  replacePhotoImage: (productId: string, photoId: string, dataUrl: string, versions?: PhotoVersions) => void;
+  /**
+   * Show the photo without its background. Cloudinary processes it only the first
+   * time; after that the stored copy is reused. The original is never replaced.
+   */
+  removeBackground: (productId: string, photoId: string) => Promise<CutoutResult>;
+  /** Show the untouched original photo again (instant: no Cloudinary call). */
+  restoreOriginal: (productId: string, photoId: string) => void;
+  /**
+   * Make sure an enhanced copy of the photo's current version exists, so it can be
+   * previewed. Cloudinary processes each version once; after that the stored copy
+   * is reused. Nothing is shown until `setEnhanced` saves the choice.
+   */
+  enhance: (productId: string, photoId: string) => Promise<CutoutResult>;
+  /** Save whether the photo shows its enhanced copy (instant: no Cloudinary call). */
+  setEnhanced: (productId: string, photoId: string, enhanced: boolean) => void;
+  /**
+   * Store a hand refinement of a photo's cutout, or `null` to drop it (back to the
+   * plain cutout). The cutout and original are never changed. Resolves once saved;
+   * rejects when saving fails, leaving the previous version in place.
+   */
+  saveRefinement: (productId: string, photoId: string, refinement: Refinement | null) => Promise<void>;
   removePhoto: (productId: string, photoId: string) => void;
   setImages: (images: Record<string, string>) => void;
   setBusy: (delta: number) => void;
@@ -146,8 +195,6 @@ const TYPING_DEBOUNCE_MS = 700;
 const UNDO_WINDOW_MS = 6_500;
 const MAX_MOVEMENTS = 2000;
 
-type ProductPatch = Partial<Pick<Product, "name" | "type" | "sku" | "costCents" | "priceCents">>;
-
 function blankProduct(sizes: string[]): Product {
   return {
     id: newId(),
@@ -191,6 +238,22 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           return full;
         };
         let lastGridEdit: { key: string; movementId: string; at: number } | null = null;
+        const editPhoto = (productId: string, photoId: string, fn: (ph: Photo) => Photo) =>
+          edit(productId, (p) => ({ ...p, photos: p.photos.map((ph) => (ph.id === photoId ? fn(ph) : ph)) }));
+        /** Background removals in flight, so a repeated click joins the same request. */
+        const cutoutRequests = new Map<string, Promise<CutoutResult>>();
+        /** Enhancements in flight, by the file they produce. */
+        const enhanceRequests = new Map<string, Promise<CutoutResult>>();
+        /** Storing a photo's enhanced copies (and their files' keys in `images`). */
+        const keepEnhanced = (productId: string, photoId: string, files: Partial<Record<PhotoVersion, string>>) => {
+          const entries = (Object.entries(files) as [PhotoVersion, string | undefined][]).filter((e): e is [PhotoVersion, string] => !!e[1]);
+          if (!entries.length) return;
+          set((s) => ({ images: { ...s.images, ...Object.fromEntries(entries.map(([v, url]) => [enhancedKey(photoId, v), url])) } }));
+          if (demo) entries.forEach(([v, url]) => photoDb.put(enhancedKey(photoId, v), url));
+          enqueue(productId, async () => {
+            for (const [v, url] of entries) await sync!.saveEnhanced(productId, photoId, v, url);
+          });
+        };
 
         // ───────────── Saving to Supabase ─────────────
         // Saves for one product (or "settings"/"staff") run in order; a failure shows an
@@ -214,6 +277,14 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           const next = (chains.get(queue) ?? Promise.resolve()).then(task).catch(fail);
           chains.set(queue, next);
           next.finally(() => chains.get(queue) === next && chains.delete(queue));
+        };
+        /** Like `enqueue`, but returns the save so the caller can handle a failure itself (no reload). */
+        const enqueueAwait = (queue: string, task: () => Promise<void>) => {
+          const result = (chains.get(queue) ?? Promise.resolve()).then(task);
+          const next = result.catch(() => {});
+          chains.set(queue, next);
+          next.finally(() => chains.get(queue) === next && chains.delete(queue));
+          return result;
         };
         /** Run `task` after `ms` of quiet for `key` (restarted by each call). */
         const later = (key: string, queue: string, ms: number, task: () => Promise<void>) => {
@@ -277,6 +348,8 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           actor: "Jemima",
           images: {},
           busy: 0,
+          cutoutPending: {},
+          enhancePending: {},
           catalogues: [],
           activeCatalogueId: null,
 
@@ -335,7 +408,7 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           deleteProduct: (id) => {
             const product = findProduct(id);
             if (!product) return;
-            if (demo) product.photos.forEach((ph) => photoDb.remove(ph.id));
+            if (demo) product.photos.forEach((ph) => photoKeys(ph.id).forEach((key) => photoDb.remove(key)));
             set((s) => ({ products: s.products.filter((p) => p.id !== id) }));
             cancelKeys((key) => key.endsWith(id) || key.startsWith(`qty:${id}|`) || key.startsWith(`undoable:${id}:`));
             productPatches.delete(id);
@@ -349,8 +422,10 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           restoreProduct: (product) => {
             if (demo) {
               product.photos.forEach((ph) => {
-                const dataUrl = get().images[ph.id];
-                if (dataUrl) photoDb.put(ph.id, dataUrl);
+                for (const key of photoKeys(ph.id)) {
+                  const dataUrl = get().images[key];
+                  if (dataUrl) photoDb.put(key, dataUrl);
+                }
               });
             }
             // Undo within the window: the removal was never sent.
@@ -564,10 +639,176 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
             const order = findProduct(productId)?.photos.map((ph) => ph.id) ?? [];
             enqueue(productId, () => sync!.reorderPhotos(order));
           },
-          replacePhotoImage: (productId, photoId, dataUrl) => {
-            set((s) => ({ images: { ...s.images, [photoId]: dataUrl } }));
-            if (demo) photoDb.put(photoId, dataUrl);
-            enqueue(productId, () => sync!.replacePhotoFile(productId, photoId, dataUrl));
+          replacePhotoImage: (productId, photoId, dataUrl, { cutout, refined, mask, enhanced = {} } = {}) => {
+            const shown = !!findProduct(productId)?.photos.find((ph) => ph.id === photoId)?.showCutout;
+            const files: Record<string, string> = {
+              [photoId]: dataUrl,
+              ...(cutout && { [cutoutKey(photoId)]: cutout }),
+              ...(refined && mask && { [refinedKey(photoId)]: refined, [maskKey(photoId)]: mask }),
+            };
+            set((s) => ({ images: { ...s.images, ...files } }));
+            if (demo) Object.entries(files).forEach(([key, url]) => photoDb.put(key, url));
+            enqueue(productId, async () => {
+              await sync!.replacePhotoFile(productId, photoId, dataUrl);
+              if (cutout) await sync!.saveCutout(productId, photoId, cutout, shown);
+              if (refined && mask) await sync!.saveRefinement(productId, photoId, refined, mask);
+            });
+            keepEnhanced(productId, photoId, enhanced);
+          },
+          removeBackground: (productId, photoId) => {
+            const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);
+            const original = get().images[photoId];
+            if (!photo || !original) return Promise.resolve({ ok: false, error: "That photo is no longer here." });
+            if (photo.hasCutout && get().images[cutoutKey(photoId)]) {
+              // Already processed: switch back to the stored copy (not enhanced until asked again).
+              if (!photo.showCutout) {
+                editPhoto(productId, photoId, (ph) => ({ ...ph, showCutout: true, enhanced: false }));
+                enqueue(productId, () => sync!.setCutoutShown(photoId, true));
+              }
+              return Promise.resolve({ ok: true });
+            }
+            const inFlight = cutoutRequests.get(photoId);
+            if (inFlight) return inFlight;
+
+            const run = async (): Promise<CutoutResult> => {
+              set((s) => ({ cutoutPending: { ...s.cutoutPending, [photoId]: true } }));
+              try {
+                const cutout = await requestCutout(original);
+                if (!findProduct(productId)?.photos.some((ph) => ph.id === photoId)) {
+                  return { ok: false, error: "That photo was removed." };
+                }
+                if (get().images[photoId] !== original) {
+                  return { ok: false, error: "The photo changed while its background was being removed. Try again." };
+                }
+                set((s) => ({ images: { ...s.images, [cutoutKey(photoId)]: cutout } }));
+                if (demo) photoDb.put(cutoutKey(photoId), cutout);
+                const wasEnhanced = !!findProduct(productId)?.photos.find((ph) => ph.id === photoId)?.enhanced;
+                editPhoto(productId, photoId, (ph) => ({ ...ph, hasCutout: true, showCutout: true, enhanced: false }));
+                enqueue(productId, async () => {
+                  await sync!.saveCutout(productId, photoId, cutout, true);
+                  if (wasEnhanced) await sync!.setEnhancedShown(photoId, false);
+                });
+                return { ok: true };
+              } catch (error) {
+                return { ok: false, error: error instanceof Error ? error.message : "Couldn't remove the background." };
+              } finally {
+                cutoutRequests.delete(photoId);
+                set((s) => {
+                  const cutoutPending = { ...s.cutoutPending };
+                  delete cutoutPending[photoId];
+                  return { cutoutPending };
+                });
+              }
+            };
+            const request = run();
+            cutoutRequests.set(photoId, request);
+            return request;
+          },
+          restoreOriginal: (productId, photoId) => {
+            if (!findProduct(productId)?.photos.find((ph) => ph.id === photoId)?.showCutout) return;
+            editPhoto(productId, photoId, (ph) => ({ ...ph, showCutout: false, enhanced: false }));
+            enqueue(productId, () => sync!.setCutoutShown(photoId, false));
+          },
+          enhance: (productId, photoId) => {
+            const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);
+            const images = get().images;
+            if (!photo || !images[photoId]) return Promise.resolve({ ok: false, error: "That photo is no longer here." });
+            const version = currentVersion(images, photo);
+            const target = enhancedKey(photoId, version);
+            // Already enhanced: reuse the stored copy.
+            if (images[target]) return Promise.resolve({ ok: true });
+            const inFlight = enhanceRequests.get(target);
+            if (inFlight) return inFlight;
+
+            const run = async (): Promise<CutoutResult> => {
+              set((s) => ({ enhancePending: { ...s.enhancePending, [photoId]: true } }));
+              const source = images[versionKey(photoId, version)];
+              const cutout = images[cutoutKey(photoId)];
+              try {
+                const files: Partial<Record<PhotoVersion, string>> = {};
+                if (version === "original") {
+                  files.original = await requestEnhanced(source);
+                } else {
+                  // Enhance the cutout (the refinement's untouched base), keeping exactly its transparency.
+                  const enhancedCutout =
+                    images[enhancedKey(photoId, "cutout")] ?? (files.cutout = await withAlphaOf(await requestEnhanced(cutout), cutout));
+                  // A refinement is the cutout with erased areas made transparent; erase the same from the enhanced cutout.
+                  if (version === "refined") files.refined = await withAlphaOf(enhancedCutout, source);
+                }
+                const now = get();
+                if (!findProduct(productId)?.photos.some((ph) => ph.id === photoId)) {
+                  return { ok: false, error: "That photo was removed." };
+                }
+                if (now.images[versionKey(photoId, version)] !== source || (version !== "original" && now.images[cutoutKey(photoId)] !== cutout)) {
+                  return { ok: false, error: "The photo changed while it was being enhanced. Try again." };
+                }
+                keepEnhanced(productId, photoId, files);
+                return { ok: true };
+              } catch (error) {
+                return { ok: false, error: error instanceof Error ? error.message : "Couldn't enhance the photo." };
+              } finally {
+                enhanceRequests.delete(target);
+                set((s) => {
+                  const enhancePending = { ...s.enhancePending };
+                  delete enhancePending[photoId];
+                  return { enhancePending };
+                });
+              }
+            };
+            const request = run();
+            enhanceRequests.set(target, request);
+            return request;
+          },
+          setEnhanced: (productId, photoId, enhanced) => {
+            const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);
+            if (!photo || !!photo.enhanced === enhanced) return;
+            editPhoto(productId, photoId, (ph) => ({ ...ph, enhanced }));
+            enqueue(productId, () => sync!.setEnhancedShown(photoId, enhanced));
+          },
+          saveRefinement: async (productId, photoId, refinement) => {
+            if (!findProduct(productId)?.photos.find((ph) => ph.id === photoId)?.hasCutout) {
+              throw new Error("Remove the photo's background before refining it.");
+            }
+            const keys = [refinedKey(photoId), maskKey(photoId)] as const;
+            // An enhanced cutout gets the same erasing, so the enhanced refinement stays in step.
+            // Without it, the stale enhanced copy is dropped: it could show erased areas again.
+            const enhancedCutout = get().images[enhancedKey(photoId, "cutout")];
+            const enhancedRefined =
+              refinement && enhancedCutout ? await withAlphaOf(enhancedCutout, refinement.refined).catch(() => undefined) : undefined;
+            // Save first, then show: a failed save leaves the previous version in place.
+            if (sync) {
+              await enqueueAwait(productId, () =>
+                refinement
+                  ? sync.saveRefinement(productId, photoId, refinement.refined, refinement.mask)
+                  : sync.clearRefinement(productId, photoId),
+              );
+            } else if (demo) {
+              await Promise.all(
+                refinement
+                  ? [photoDb.put(keys[0], refinement.refined), photoDb.put(keys[1], refinement.mask)]
+                  : keys.map((key) => photoDb.remove(key)),
+              );
+            }
+            set((s) => {
+              const images = { ...s.images };
+              if (refinement) Object.assign(images, { [keys[0]]: refinement.refined, [keys[1]]: refinement.mask });
+              else keys.forEach((key) => delete images[key]);
+              return { images };
+            });
+            editPhoto(productId, photoId, (ph) => ({ ...ph, refined: !!refinement }));
+            const stale = enhancedKey(photoId, "refined");
+            if (enhancedRefined) {
+              keepEnhanced(productId, photoId, { refined: enhancedRefined });
+            } else if (get().images[stale]) {
+              set((s) => {
+                const images = { ...s.images };
+                delete images[stale];
+                return { images };
+              });
+              if (demo) photoDb.remove(stale);
+              // Clearing a refinement already dropped its enhanced copy.
+              if (refinement) enqueue(productId, () => sync!.clearEnhanced(productId, photoId, "refined"));
+            }
           },
           removePhoto: (productId, photoId) => {
             const product = findProduct(productId);
@@ -586,7 +827,7 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
               variants: dropVariant ? p.variants.filter((v) => v.id !== dropVariant.id) : p.variants,
             }));
             if (demo) {
-              photoDb.remove(photoId);
+              photoKeys(photoId).forEach((key) => photoDb.remove(key));
               return;
             }
             later(`undoable:${productId}:photo:${photoId}`, productId, UNDO_WINDOW_MS, () =>
