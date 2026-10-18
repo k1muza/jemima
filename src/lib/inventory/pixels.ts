@@ -1,3 +1,4 @@
+import { garmentColour, sampleColour } from "./colour";
 import { blobToDataUrl } from "./cutout";
 import { MAX_EDIT_PIXELS } from "./refine";
 
@@ -62,4 +63,19 @@ export async function withAlphaOf(colourUrl: string, alphaUrl: string) {
     throw new Error("The enhanced photo doesn't match the original's size.");
   }
   return pngDataUrl(copyAlpha(colour.data, alpha.data), colour.width, colour.height);
+}
+
+/**
+ * The garment colour of a stored photo (any version: a background-removed copy
+ * gives the cleanest result, since only the garment is left). Browser-only.
+ */
+export async function detectColour(url: string) {
+  const blob = await (await fetch(url)).blob();
+  const N = 64;
+  const bitmap = await createImageBitmap(blob, { resizeWidth: N, resizeHeight: N, resizeQuality: "medium" });
+  const ctx = Object.assign(document.createElement("canvas"), { width: N, height: N }).getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  const image = ctx.getImageData(0, 0, N, N);
+  return garmentColour(image) ?? sampleColour(image, N / 2, N / 2, N / 4);
 }

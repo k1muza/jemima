@@ -606,6 +606,9 @@ export function createSupabaseInventory(supabase: Client) {
     async setIronedShown(photoId: string, shown: boolean) {
       check(await supabase.from("product_images").update({ show_ironed: shown }).eq("id", photoId));
     },
+    async setDetectedHex(photoId: string, hex: string) {
+      check(await supabase.from("product_images").update({ detected_hex: hex }).eq("id", photoId));
+    },
     async assignPhoto(photoId: string, variantId: string) {
       check(await supabase.from("product_images").update({ variant_id: variantId }).eq("id", photoId));
     },

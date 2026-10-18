@@ -11,6 +11,7 @@ import {
   ironedKey,
   maskKey,
   photoKeys,
+  photoSrc,
   refinedKey,
   requestCutout,
   requestEnhanced,
@@ -19,7 +20,7 @@ import {
   type PhotoVersion,
 } from "@/lib/inventory/cutout";
 import { photoDb } from "@/lib/inventory/photo-db";
-import { withAlphaOf } from "@/lib/inventory/pixels";
+import { detectColour, withAlphaOf } from "@/lib/inventory/pixels";
 import { seedMovements, seedProducts, seedSettings } from "@/lib/inventory/seed";
 import { isEmptyProduct, qtyOf, variantUnits } from "@/lib/inventory/stock";
 import {
@@ -270,6 +271,44 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
           if (demo) entries.forEach(([v, url]) => photoDb.put(enhancedKey(photoId, v), url));
           enqueue(productId, async () => {
             for (const [v, url] of entries) await sync!.saveEnhanced(productId, photoId, v, url);
+          });
+        };
+        /**
+         * Detect a photo's colour again from the version now shown (after removing
+         * the background or saving an enhancement). The photo's own colour always
+         * updates; its row follows only when the row is led by this photo and its
+         * colour wasn't set by hand. Rows are never merged or split here.
+         */
+        const redetect = async (productId: string, photoId: string) => {
+          if (!get().settings.autoDetectColours) return;
+          const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);
+          const url = photo && photoSrc(get().images, photo);
+          if (!url) return;
+          let hex: string | null;
+          try {
+            hex = await detectColour(url);
+          } catch {
+            return; // Keep the earlier colour; nothing the user needs to act on.
+          }
+          const now = findProduct(productId);
+          const current = now?.photos.find((ph) => ph.id === photoId);
+          // Skip when the photo went, or a different version is shown by now.
+          if (!hex || !now || !current || photoSrc(get().images, current) !== url) return;
+          const variant = now.variants.find((v) => v.id === current.variantId);
+          const leadsRow = !!variant && now.photos.find((ph) => ph.variantId === variant.id)?.id === photoId;
+          const recolourRow = variant && leadsRow && (variant.colourStatus === "detected" || variant.colourStatus === "needs_review");
+          const detected = hex;
+          const colourName = nameColour(detected);
+          edit(productId, (p) => ({
+            ...p,
+            photos: p.photos.map((ph) => (ph.id === photoId ? { ...ph, hex: detected } : ph)),
+            variants: recolourRow
+              ? p.variants.map((v) => (v.id === variant.id ? { ...v, colourHex: detected, colourName } : v))
+              : p.variants,
+          }));
+          enqueue(productId, async () => {
+            await sync!.setDetectedHex(photoId, detected);
+            if (recolourRow) await sync!.updateVariant(variant.id, { colourHex: detected, colourName });
           });
         };
 
@@ -697,6 +736,7 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
               if (!photo.showCutout) {
                 editPhoto(productId, photoId, (ph) => ({ ...ph, showCutout: true, enhanced: false }));
                 enqueue(productId, () => sync!.setCutoutShown(photoId, true));
+                void redetect(productId, photoId);
               }
               return Promise.resolve({ ok: true });
             }
@@ -721,6 +761,7 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
                   await sync!.saveCutout(productId, photoId, cutout, true);
                   if (wasEnhanced) await sync!.setEnhancedShown(photoId, false);
                 });
+                await redetect(productId, photoId);
                 return { ok: true };
               } catch (error) {
                 return { ok: false, error: error instanceof Error ? error.message : "Couldn't remove the background." };
@@ -797,6 +838,7 @@ export function createInventoryStore({ mode, backend, onError }: InventoryStoreO
             if (!photo || !!photo.enhanced === enhanced) return;
             editPhoto(productId, photoId, (ph) => ({ ...ph, enhanced }));
             enqueue(productId, () => sync!.setEnhancedShown(photoId, enhanced));
+            if (enhanced) void redetect(productId, photoId);
           },
           ironClothes: (productId, photoId) => {
             const photo = findProduct(productId)?.photos.find((ph) => ph.id === photoId);

@@ -9,7 +9,9 @@ const photoDb = vi.hoisted(() => ({
 vi.mock("@/lib/inventory/photo-db", () => ({ photoDb }));
 /** Pixel work needs a browser; stand in with a readable result: the colours of one image, the alpha of another. */
 const withAlphaOf = vi.hoisted(() => vi.fn(async (colour: string, alpha: string) => `${colour}|alpha:${alpha}`));
-vi.mock("@/lib/inventory/pixels", () => ({ withAlphaOf }));
+/** Colour detection needs a browser too: "detects" a colour from the URL it was given. */
+const detectColour = vi.hoisted(() => vi.fn<(url: string) => Promise<string | null>>(async () => "#a6dcc6"));
+vi.mock("@/lib/inventory/pixels", () => ({ withAlphaOf, detectColour }));
 
 import type { SupabaseInventory } from "@/lib/backend/supabase-inventory";
 import { cutoutKey, enhancedKey, ironedKey, maskKey, photoKeys, photoSrc, refinedKey } from "@/lib/inventory/cutout";
@@ -37,6 +39,7 @@ function memoryStorage() {
 beforeEach(() => {
   Object.values(photoDb).forEach((fn) => fn.mockClear());
   withAlphaOf.mockClear();
+  detectColour.mockClear();
   fetchMock = vi.fn(async () => pngResponse());
   vi.stubGlobal("fetch", fetchMock);
   vi.stubGlobal("localStorage", memoryStorage());
@@ -219,6 +222,8 @@ describe("background removal", () => {
 describe("background removal with Supabase", () => {
   function supabaseStore() {
     const backend = {
+      setDetectedHex: vi.fn(async () => {}),
+      updateVariant: vi.fn(async () => {}),
       saveCutout: vi.fn(async () => {}),
       setCutoutShown: vi.fn(async () => {}),
       replacePhotoFile: vi.fn(async () => {}),
@@ -252,6 +257,7 @@ describe("background removal with Supabase", () => {
     await store.getState().flushPending();
     expect(backend.saveCutout).toHaveBeenCalledWith("prod", "ph", CUTOUT, true);
     expect(backend.replacePhotoFile).not.toHaveBeenCalled(); // the original file is untouched
+    expect(backend.setDetectedHex).toHaveBeenCalledWith("ph", "#a6dcc6"); // colour detected again from the cutout
 
     store.getState().restoreOriginal("prod", "ph");
     await store.getState().removeBackground("prod", "ph");
@@ -537,6 +543,8 @@ describe("enhancement", () => {
 describe("enhancement with Supabase", () => {
   function supabaseStore() {
     const backend = {
+      setDetectedHex: vi.fn(async () => {}),
+      updateVariant: vi.fn(async () => {}),
       saveCutout: vi.fn(async () => {}),
       setCutoutShown: vi.fn(async () => {}),
       replacePhotoFile: vi.fn(async () => {}),
@@ -704,6 +712,8 @@ describe("AI clothes ironing", () => {
 
   it("uploads and persists an accepted result with Supabase, then restores without uploading again", async () => {
     const backend = {
+      setDetectedHex: vi.fn(async () => {}),
+      updateVariant: vi.fn(async () => {}),
       saveIroned: vi.fn(async () => "https://res.cloudinary.com/demo/ironed.jpg"),
       setIronedShown: vi.fn(async () => {}),
     };
@@ -750,6 +760,8 @@ describe("WhatsApp catalogue URL", () => {
 
   function supabaseStore() {
     const backend = {
+      setDetectedHex: vi.fn(async () => {}),
+      updateVariant: vi.fn(async () => {}),
       createProduct: vi.fn(async () => {}),
       updateProduct: vi.fn(async () => {}),
     };
@@ -835,5 +847,56 @@ describe("moving a photo between colour rows", () => {
     store.getState().assignPhoto(productId, photoId, first.id);
     expect(product(store, productId).variants.map((v) => v.id)).toEqual([first.id, kept.id]);
     expect(own.id).not.toBe(kept.id);
+  });
+});
+
+describe("colour detection after editing a photo", () => {
+  const ENHANCED = "data:image/png;base64,AwQ=";
+  const product = (s: ReturnType<typeof demoStore>["store"], id: string) => s.getState().products.find((p) => p.id === id)!;
+
+  function store() {
+    const demo = demoStore();
+    fetchMock.mockImplementation(async (url: string) =>
+      url === "/api/enhance" ? new Response(new Blob([new Uint8Array([3, 4])], { type: "image/png" })) : pngResponse(),
+    );
+    return demo;
+  }
+
+  it("detects again from the background-removed copy, recolouring a detected row", async () => {
+    const { store: s, productId, photoId, photo } = store();
+    await s.getState().removeBackground(productId, photoId);
+    expect(detectColour).toHaveBeenCalledWith(CUTOUT);
+    expect(photo().hex).toBe("#a6dcc6");
+    expect(product(s, productId).variants[0]).toMatchObject({ colourHex: "#a6dcc6", colourName: "Mint", colourStatus: "detected" });
+  });
+
+  it("detects again once an enhancement is saved, not while it's only a preview", async () => {
+    const { store: s, productId, photoId } = store();
+    await s.getState().enhance(productId, photoId);
+    expect(detectColour).not.toHaveBeenCalled();
+    s.getState().setEnhanced(productId, photoId, true);
+    await vi.waitFor(() => expect(detectColour).toHaveBeenCalledWith(ENHANCED));
+    await vi.waitFor(() => expect(product(s, productId).variants[0].colourName).toBe("Mint"));
+  });
+
+  it("never overwrites a colour set by hand, but still updates the photo's own colour", async () => {
+    const { store: s, productId, photoId, photo } = store();
+    const row = product(s, productId).variants[0];
+    s.getState().updateVariant(productId, row.id, { colourHex: "#25304a", colourName: "Navy" });
+    await s.getState().removeBackground(productId, photoId);
+    expect(photo().hex).toBe("#a6dcc6");
+    expect(product(s, productId).variants[0]).toMatchObject({ colourHex: "#25304a", colourName: "Navy", colourStatus: "corrected" });
+  });
+
+  it("does nothing with detection switched off, or when detection fails", async () => {
+    const { store: s, productId, photoId, photo } = store();
+    detectColour.mockRejectedValueOnce(new Error("decode failed"));
+    expect(await s.getState().removeBackground(productId, photoId)).toEqual({ ok: true });
+    expect(photo().hex).toBe("#aa3344");
+
+    s.getState().restoreOriginal(productId, photoId);
+    s.setState((st) => ({ settings: { ...st.settings, autoDetectColours: false } }));
+    await s.getState().removeBackground(productId, photoId);
+    expect(detectColour).toHaveBeenCalledTimes(1);
   });
 });
